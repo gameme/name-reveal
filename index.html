@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Udbhava</title>
+    <style>
+        @font-face {
+            font-family: 'Nistha';
+            src: url('fonts/nistha.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Samarkan';
+            src: url('fonts/samarkan.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'AnekKannada';
+            src: url('fonts/anek-kannada.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Akasha';
+            src: url('fonts/akasha.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #050505; overflow-x: hidden; }
+        .scroll-container { height: 800vh; position: relative; }
+        canvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            z-index: 1;
+        }
+        .scroll-hint {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+        .scroll-hint.hidden { opacity: 0; pointer-events: none; }
+        .scroll-hint .hint-text {
+            font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif;
+            font-weight: 100;
+            font-size: 16px;
+            letter-spacing: 3px;
+            color: rgba(210, 160, 120, 0.6);
+            animation: pulse-down 2s ease-in-out infinite;
+        }
+        .scroll-hint svg {
+            width: 28px;
+            height: 28px;
+            animation: pulse-down 2s ease-in-out infinite;
+        }
+        .scroll-hint svg path {
+            fill: none;
+            stroke: rgba(210, 160, 120, 0.5);
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        @keyframes pulse-down {
+            0%, 100% { opacity: 0.3; transform: translateY(0); }
+            50% { opacity: 0.8; transform: translateY(6px); }
+        }
+        .mute-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 50;
+            background: rgba(30, 25, 20, 0.7);
+            border: 1px solid rgba(210, 160, 120, 0.3);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.3s;
+            opacity: 0;
+        }
+        .mute-btn.visible { opacity: 1; }
+        .mute-btn svg { width: 20px; height: 20px; }
+        .mute-btn path { fill: rgba(210, 160, 120, 0.7); }
+        .watermark {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 5;
+            font-family: Samarkan, Georgia, serif;
+            font-size: clamp(28px, 5vw, 56px);
+            letter-spacing: 4px;
+            color: rgba(210, 160, 120, 0.12);
+            pointer-events: none;
+        }
+        .watermark.hidden { opacity: 0; }
+    </style>
+</head>
+<body>
+    <div class="scroll-container"></div>
+    <canvas id="tanpura"></canvas>
+    <div class="watermark">Udbhava</div>
+    <div class="scroll-hint">
+        <span class="hint-text">A name awaits</span>
+        <svg viewBox="0 0 24 24"><path d="M12 4 L12 18 M6 13 L12 19 L18 13"/></svg>
+    </div>
+    <button class="mute-btn" id="muteBtn">
+        <svg viewBox="0 0 24 24" id="muteIcon">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+        </svg>
+    </button>
+
+    <script src="js/errors.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/shared.js"></script>
+    <script src="js/cache.js"></script>
+    <script src="js/input.js"></script>
+    <script src="js/strings.js"></script>
+    <script src="js/wave-models.js"></script>
+    <script src="js/particles.js"></script>
+    <script src="js/supernova.js"></script>
+    <script src="js/dualcore.js"></script>
+    <script src="js/footer.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

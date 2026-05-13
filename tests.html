@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head><title>Udbhava - Tests</title></head>
+<body>
+<pre id="output"></pre>
+<script>
+const results = [];
+function assert(condition, msg) {
+    results.push({ pass: !!condition, msg });
+}
+
+function assertClose(a, b, msg, tol = 0.0001) {
+    results.push({ pass: Math.abs(a - b) < tol, msg: `${msg} (got ${a}, expected ${b})` });
+}
+function easeOutQuint(t) { return 1 - Math.pow(1 - t, 5); }
+function smoothstep(a, b, t) { const x = Math.max(0, Math.min(1, (t-a)/(b-a))); return x*x*(3-2*x); }
+
+// --- Bug #1: Negative radius crash (P0 fix) ---
+// Particles with life <= 0 must never reach drawing code
+function particleSizeIsDrawable(life, pSize, DPR) {
+    const size = pSize * DPR * life;
+    return size > 0;
+}
+
+assert(!particleSizeIsDrawable(-0.01, 2, 2), 'Negative life → size guard blocks drawing');
+assert(!particleSizeIsDrawable(0, 1.5, 2), 'Zero life → size guard blocks drawing');
+assert(particleSizeIsDrawable(0.001, 2, 2), 'Tiny positive life → still drawable');
+assert(particleSizeIsDrawable(1.0, 2.5, 2), 'Full life → drawable');
+
+// --- Bug #1b: Orb absorption must remove before draw, not decrement ---
+function shouldAbsorbAtOrb(dist, orbRadius) {
+    return dist < orbRadius * 0.6;
+}
+assert(shouldAbsorbAtOrb(10, 100), 'Close particle absorbed (dist=10, orb=100)');
+assert(!shouldAbsorbAtOrb(70, 100), 'Far particle NOT absorbed (dist=70)');
+assert(shouldAbsorbAtOrb(0, 50), 'Zero distance always absorbed');
+assert(shouldAbsorbAtOrb(29, 50), 'dist=29 < 50*0.6=30 → absorbed');
+assert(!shouldAbsorbAtOrb(31, 50), 'dist=31 > 50*0.6=30 → not absorbed');
+
+// --- Speed cap: prevents runaway velocity ---
+function capSpeed(vx, vy, maxSpeed) {
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    if (speed > maxSpeed) {
+        return { vx: (vx / speed) * maxSpeed, vy: (vy / speed) * maxSpeed };
+    }
+    return { vx, vy };
+}
+const c1 = capSpeed(100, 0, 16);
+assert(Math.abs(c1.vx - 16) < 0.001, 'Horizontal over-speed capped to 16');
+const c2 = capSpeed(0, -200, 16);
+assert(Math.abs(c2.vy + 16) < 0.001, 'Vertical over-speed capped (preserves sign)');
+const c3 = capSpeed(3, 4, 16);
+assert(c3.vx === 3 && c3.vy === 4, 'Under-speed unchanged (magnitude=5 < 16)');
+
+// --- Letter formation: index clamping prevents array OOB ---
+function getActiveLetterIndex(elapsed, letterDuration) {
+    return Math.min(4, Math.floor(elapsed / letterDuration));
+}
+assert(getActiveLetterIndex(0, 1.5) === 0, 'elapsed=0 → index 0 (R)');
+assert(getActiveLetterIndex(1.49, 1.5) === 0, 'Just before boundary → still 0');
+assert(getActiveLetterIndex(1.5, 1.5) === 1, 'Exactly at boundary → index 1');
+assert(getActiveLetterIndex(7.4, 1.5) === 4, 'Near end → index 4 (last letter)');
+assert(getActiveLetterIndex(999, 1.5) === 4, 'Overflow clamped to 4');
+assert(getActiveLetterIndex(-1, 1.5) <= 0, 'Negative elapsed → index ≤ 0 (no OOB on right)');
+
+// --- Font cycling: index wraps correctly ---
+function getFontSegIndex(cycleElapsed, holdDuration, transitionDuration, fontCount) {
+    const segmentDuration = holdDuration + transitionDuration;
+    const totalCycle = segmentDuration * fontCount;
+    const cycleT = cycleElapsed % totalCycle;
+    return Math.floor(cycleT / segmentDuration);
+}
+assert(getFontSegIndex(0, 10, 0.8, 3) === 0, 'Start of cycle → font 0');
+assert(getFontSegIndex(10.5, 10, 0.8, 3) === 0, 'Mid-transition of font 0 → still seg 0');
+assert(getFontSegIndex(10.8, 10, 0.8, 3) === 1, 'After transition → font 1');
+assert(getFontSegIndex(21.6, 10, 0.8, 3) === 2, 'Third segment → font 2');
+assert(getFontSegIndex(32.5, 10, 0.8, 3) === 0, 'Past full cycle wraps → font 0');
+
+// --- Reveal start/reset: scroll-up resets cycle ---
+function simulateRevealReset(progressSequence) {
+    let startTime = -1;
+    const log = [];
+    progressSequence.forEach(([progress, time]) => {
+        if (progress <= 0) startTime = -1;
+        if (progress > 0 && startTime < 0) startTime = time;
+        log.push(startTime);
+    });
+    return log;
+}
+const resetLog = simulateRevealReset([[0.9, 10], [0.95, 11], [0, 12], [0.85, 15]]);
+assert(resetLog[0] === 10, 'First reveal sets start=10');
+assert(resetLog[1] === 10, 'Continued reveal keeps start=10');
+assert(resetLog[2] === -1, 'Scroll up resets to -1');
+assert(resetLog[3] === 15, 'Re-entering reveal sets new start=15');
+
+// --- Smoothstep boundary correctness ---
+assert(smoothstep(0.3, 0.7, 0.3) === 0, 'smoothstep at lower bound = 0');
+assert(smoothstep(0.3, 0.7, 0.7) === 1, 'smoothstep at upper bound = 1');
+assert(smoothstep(0.3, 0.7, 0.1) === 0, 'smoothstep below range clamped to 0');
+assert(smoothstep(0.3, 0.7, 0.9) === 1, 'smoothstep above range clamped to 1');
+assertClose(smoothstep(0.3, 0.7, 0.5), 0.5, 'smoothstep midpoint ≈ 0.5');
+
+// --- Object pool: spawn/recycle/aliveCount ---
+function createTestPool(poolSize, maxParticles) {
+    const pool = [];
+    let aliveCount = 0;
+    for (let i = 0; i < poolSize; i++) {
+        pool.push({ alive: false, life: 0 });
+    }
+
+    function spawn() {
+        if (aliveCount >= maxParticles) {
+            for (let i = 0; i < poolSize; i++) {
+                if (pool[i].alive) { pool[i].alive = false; aliveCount--; break; }
+            }
+        }
+        for (let i = 0; i < poolSize; i++) {
+            if (!pool[i].alive) {
+                pool[i].alive = true;
+                pool[i].life = 1.0;
+                aliveCount++;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function kill(idx) {
+        if (pool[idx].alive) {
+            pool[idx].alive = false;
+            aliveCount = Math.max(0, aliveCount - 1);
+        }
+    }
+
+    return { pool, spawn, kill, getAlive: () => aliveCount };
+}
+
+const tp1 = createTestPool(10, 5);
+tp1.spawn(); tp1.spawn(); tp1.spawn();
+assert(tp1.getAlive() === 3, 'Pool: 3 spawns → aliveCount = 3');
+tp1.spawn(); tp1.spawn();
+assert(tp1.getAlive() === 5, 'Pool: 5 spawns → aliveCount = 5 (at max)');
+tp1.spawn();
+assert(tp1.getAlive() === 5, 'Pool: spawn at max recycles oldest → still 5');
+assert(tp1.pool[0].alive, 'Pool: slot 0 was recycled then immediately reused for new particle');
+tp1.kill(1);
+assert(tp1.getAlive() === 4, 'Pool: kill → aliveCount = 4');
+tp1.kill(1);
+assert(tp1.getAlive() === 4, 'Pool: double-kill same slot → no underflow (stays 4)');
+
+// Edge case: kill all then spawn again
+const tp2 = createTestPool(5, 3);
+tp2.spawn(); tp2.spawn(); tp2.spawn();
+tp2.kill(0); tp2.kill(1); tp2.kill(2);
+assert(tp2.getAlive() === 0, 'Pool: all killed → 0');
+tp2.spawn();
+assert(tp2.getAlive() === 1, 'Pool: spawn after full kill → 1');
+
+// --- aliveCount never goes negative ---
+const tp3 = createTestPool(5, 3);
+tp3.kill(0); tp3.kill(1); tp3.kill(2);
+assert(tp3.getAlive() === 0, 'Pool: killing dead slots → aliveCount stays 0 (Math.max guard)');
+
+// --- noteIdx bounds (modulo guard) ---
+function safeNoteIdx(randValue, symbolCount) {
+    return Math.floor(randValue * symbolCount) % symbolCount;
+}
+assert(safeNoteIdx(0, 5) === 0, 'noteIdx: rand=0 → 0');
+assert(safeNoteIdx(0.99, 5) === 4, 'noteIdx: rand=0.99 → 4');
+assert(safeNoteIdx(1.0, 5) === 0, 'noteIdx: rand=1.0 (edge) → 0 via modulo');
+
+// --- drawSz floor check ---
+function shouldDraw(size) {
+    const noteSize = size * 5;
+    const drawSz = noteSize * 2;
+    return drawSz >= 2;
+}
+assert(!shouldDraw(0.1), 'drawSz: size=0.1 → drawSz=1 → skip');
+assert(shouldDraw(0.5), 'drawSz: size=0.5 → drawSz=5 → draw');
+assert(!shouldDraw(0), 'drawSz: size=0 → skip');
+
+// --- Squared distance vs linear threshold equivalence ---
+function absorbedSquared(dx, dy, radius, factor) {
+    return (dx*dx + dy*dy) < (radius * radius * factor * factor);
+}
+function absorbedLinear(dx, dy, radius, factor) {
+    return Math.sqrt(dx*dx + dy*dy) < radius * factor;
+}
+// These must agree
+assert(absorbedSquared(3, 4, 100, 0.6) === absorbedLinear(3, 4, 100, 0.6), 'Squared check matches linear: inside');
+assert(absorbedSquared(50, 50, 100, 0.6) === absorbedLinear(50, 50, 100, 0.6), 'Squared check matches linear: outside');
+assert(absorbedSquared(0, 59, 100, 0.6) === absorbedLinear(0, 59, 100, 0.6), 'Squared check matches linear: boundary');
+
+// --- getSpriteRow picks closest size index ---
+function getSpriteRow(targetSize) {
+    const SPRITE_SIZES = [10, 20, 36, 56];
+    let best = 0;
+    for (let i = 1; i < SPRITE_SIZES.length; i++) {
+        if (Math.abs(SPRITE_SIZES[i] - targetSize) < Math.abs(SPRITE_SIZES[best] - targetSize)) best = i;
+    }
+    return best;
+}
+assert(getSpriteRow(8) === 0, 'spriteRow: target 8 → row 0 (size 10)');
+assert(getSpriteRow(15) === 0, 'spriteRow: target 15 → row 0 (equidistant, keeps first match)');
+assert(getSpriteRow(30) === 2, 'spriteRow: target 30 → row 2 (size 36)');
+assert(getSpriteRow(50) === 3, 'spriteRow: target 50 → row 3 (size 56)');
+assert(getSpriteRow(100) === 3, 'spriteRow: target 100 → capped at largest');
+
+// --- Gradient cache: threshold-based invalidation ---
+function shouldRecacheGradient(r, orbAlpha, breathe, lastR, lastAlpha, lastBreathe) {
+    return Math.abs(r - lastR) > 1 || Math.abs(orbAlpha - lastAlpha) > 0.01 || Math.abs(breathe - lastBreathe) > 0.05;
+}
+assert(!shouldRecacheGradient(50, 0.5, 0.7, 50, 0.5, 0.7), 'No change → no recache');
+assert(!shouldRecacheGradient(50.5, 0.505, 0.72, 50, 0.5, 0.7), 'Small change within threshold → no recache');
+assert(shouldRecacheGradient(52, 0.5, 0.7, 50, 0.5, 0.7), 'R changed >1 → recache');
+assert(shouldRecacheGradient(50, 0.52, 0.7, 50, 0.5, 0.7), 'Alpha changed >0.01 → recache');
+assert(shouldRecacheGradient(50, 0.5, 0.76, 50, 0.5, 0.7), 'Breathe changed >0.05 → recache');
+
+// --- Input system ---
+function createTestInput() {
+    const pointers = new Map();
+    return {
+        pointers,
+        update(id, x, y) {
+            const p = pointers.get(id);
+            if (p) { p.prevX = p.x; p.prevY = p.y; p.x = x; p.y = y; }
+            else pointers.set(id, { id, x, y, prevX: x, prevY: y });
+        },
+        remove(id) { pointers.delete(id); },
+        clear() { pointers.clear(); }
+    };
+}
+
+const inp = createTestInput();
+inp.update('mouse', 100, 200);
+assert(inp.pointers.size === 1, 'Input: first update creates pointer');
+assert(inp.pointers.get('mouse').x === 100, 'Input: x stored correctly');
+assert(inp.pointers.get('mouse').prevX === 100, 'Input: first update sets prevX = x');
+
+inp.update('mouse', 150, 210);
+assert(inp.pointers.get('mouse').prevX === 100, 'Input: second update saves prev');
+assert(inp.pointers.get('mouse').x === 150, 'Input: second update sets new x');
+
+inp.update(0, 50, 50);
+inp.update(1, 200, 200);
+assert(inp.pointers.size === 3, 'Input: multi-touch adds separate pointers');
+
+inp.remove('mouse');
+assert(inp.pointers.size === 2, 'Input: remove deletes specific pointer');
+assert(!inp.pointers.has('mouse'), 'Input: removed pointer is gone');
+
+inp.clear();
+assert(inp.pointers.size === 0, 'Input: clear removes all');
+
+// --- StringInteraction lock logic ---
+function createTestLocks() {
+    const locks = new Map();
+    return {
+        locks,
+        getLockKey(pid, sidx) { return `${pid}-${sidx}`; },
+        lock(pid, sidx) { locks.set(this.getLockKey(pid, sidx), true); },
+        unlock(pid, sidx) { locks.delete(this.getLockKey(pid, sidx)); },
+        isLocked(pid, sidx) { return locks.has(this.getLockKey(pid, sidx)); },
+        clearForPointer(pid) {
+            for (const key of [...locks.keys()]) {
+                if (key.startsWith(`${pid}-`)) locks.delete(key);
+            }
+        }
+    };
+}
+
+const lk = createTestLocks();
+lk.lock('mouse', 0);
+lk.lock('mouse', 1);
+lk.lock(1, 0);
+assert(lk.isLocked('mouse', 0), 'Lock: mouse-0 is locked');
+assert(lk.isLocked('mouse', 1), 'Lock: mouse-1 is locked');
+assert(lk.isLocked(1, 0), 'Lock: touch1-0 is locked');
+assert(!lk.isLocked('mouse', 2), 'Lock: mouse-2 is NOT locked');
+
+lk.unlock('mouse', 0);
+assert(!lk.isLocked('mouse', 0), 'Lock: unlock removes specific lock');
+assert(lk.isLocked('mouse', 1), 'Lock: other locks unaffected');
+
+lk.clearForPointer('mouse');
+assert(!lk.isLocked('mouse', 1), 'Lock: clearForPointer removes all for that pointer');
+assert(lk.isLocked(1, 0), 'Lock: other pointer locks unaffected');
+
+// --- Pluck decay ---
+function simulatePluckDecay(initial, frames) {
+    let offset = initial;
+    for (let i = 0; i < frames; i++) {
+        offset *= 0.92;
+        if (Math.abs(offset) < 0.5) { offset = 0; break; }
+    }
+    return offset;
+}
+assert(simulatePluckDecay(40, 1) === 40 * 0.92, 'Pluck: one frame decay');
+assert(simulatePluckDecay(40, 60) === 0, 'Pluck: fully decayed after many frames');
+assert(simulatePluckDecay(0.4, 1) === 0, 'Pluck: below threshold snaps to 0');
+assert(simulatePluckDecay(-30, 1) === -30 * 0.92, 'Pluck: negative offset decays toward 0');
+
+// --- Pluck force capping ---
+function capPluck(current, force, max) {
+    let offset = current + force;
+    return Math.max(-max, Math.min(max, offset));
+}
+assert(capPluck(0, 30, 60) === 30, 'PluckCap: normal add');
+assert(capPluck(50, 20, 60) === 60, 'PluckCap: capped at max');
+assert(capPluck(-50, -20, 60) === -60, 'PluckCap: capped at -max');
+assert(capPluck(30, -50, 60) === -20, 'PluckCap: opposite direction subtracts');
+
+// --- Swept collision: pointer crossing string detection ---
+function crossedOver(prevX, currX, stringX) {
+    return (prevX - stringX) * (currX - stringX) < 0;
+}
+assert(crossedOver(90, 110, 100), 'Swept: pointer crosses string left→right');
+assert(crossedOver(110, 90, 100), 'Swept: pointer crosses string right→left');
+assert(!crossedOver(90, 95, 100), 'Swept: pointer stays on same side (left)');
+assert(!crossedOver(110, 105, 100), 'Swept: pointer stays on same side (right)');
+assert(!crossedOver(100, 100, 100), 'Swept: pointer exactly on string → no crossing');
+assert(crossedOver(99.9, 100.1, 100), 'Swept: tiny crossing still detected');
+
+// --- Swara index mapping: position to note ---
+function getSwaraIndex(normalizedY, count) {
+    return Math.min(count - 1, Math.floor(normalizedY * count));
+}
+assert(getSwaraIndex(0, 8) === 0, 'Swara: top of string → Sa (index 0)');
+assert(getSwaraIndex(0.99, 8) === 7, 'Swara: bottom of string → Sa\' (index 7)');
+assert(getSwaraIndex(0.5, 8) === 4, 'Swara: middle → Pa (index 4)');
+assert(getSwaraIndex(1.0, 8) === 7, 'Swara: clamped at max index');
+assert(getSwaraIndex(0.124, 8) === 0, 'Swara: just below boundary → stays at 0');
+assert(getSwaraIndex(0.125, 8) === 1, 'Swara: at boundary → advances to 1');
+
+// --- Wave model: quadratic falloff approximation ---
+function waveFalloff(dist, threshold) {
+    if (dist > threshold || dist < -threshold) return 0;
+    const distSq = dist * dist;
+    const factor = 1 / (threshold * threshold);
+    const falloff = 1 - distSq * factor;
+    return falloff <= 0 ? 0 : falloff;
+}
+assertClose(waveFalloff(0, 0.08), 1.0, 'Falloff: center = 1.0');
+assertClose(waveFalloff(0.08, 0.08), 0, 'Falloff: at threshold = 0', 0.01);
+assert(waveFalloff(0.1, 0.08) === 0, 'Falloff: beyond threshold = 0');
+assert(waveFalloff(0.04, 0.08) > 0.5, 'Falloff: halfway point > 0.5');
+assert(waveFalloff(-0.04, 0.08) > 0.5, 'Falloff: symmetric for negative dist');
+
+// --- Glow decay: spread grows while glow fades ---
+function simulateGlow(frames, glowDecay, glowSpeed) {
+    let glow = 1, spread = 0;
+    for (let i = 0; i < frames; i++) {
+        glow *= glowDecay;
+        spread += glowSpeed;
+        if (glow < 0.01) { glow = 0; break; }
+    }
+    return { glow, spread };
+}
+const g1 = simulateGlow(1, 0.95, 20);
+assertClose(g1.glow, 0.95, 'Glow: one frame decay');
+assert(g1.spread === 20, 'Glow: one frame spread');
+const g2 = simulateGlow(100, 0.95, 20);
+assert(g2.glow === 0, 'Glow: fully faded after many frames');
+assert(g2.spread > 0, 'Glow: spread accumulated before fade');
+const g3 = simulateGlow(30, 0.95, 20);
+assert(g3.glow > 0, 'Glow: still active at 30 frames');
+assert(g3.spread === 30 * 20, 'Glow: spread grows linearly while active');
+
+// --- Outward push: negative pull direction ---
+function computeOutwardForce(px, py, cx, cy, pullStrength) {
+    const dx = px - cx;
+    const dy = py - cy;
+    const distSq = dx * dx + dy * dy;
+    if (distSq <= 1) return { fx: 0, fy: 0 };
+    const invDist = 1 / Math.sqrt(distSq);
+    const push = -pullStrength * 0.15;
+    return { fx: dx * invDist * push, fy: dy * invDist * push };
+}
+const out1 = computeOutwardForce(200, 100, 100, 100, -0.3);
+assert(out1.fx > 0, 'OutwardPush: particle right of center → pushed right');
+assert(Math.abs(out1.fy) < 0.001, 'OutwardPush: no vertical push when vertically aligned');
+const out2 = computeOutwardForce(100, 200, 100, 100, -0.3);
+assert(out2.fy > 0, 'OutwardPush: particle below center → pushed down');
+const out3 = computeOutwardForce(50, 100, 100, 100, -0.3);
+assert(out3.fx < 0, 'OutwardPush: particle left of center → pushed left');
+const out4 = computeOutwardForce(100, 100, 100, 100, -0.3);
+assert(out4.fx === 0 && out4.fy === 0, 'OutwardPush: at center → no push (distSq guard)');
+
+// --- Normalized speed: velocity to 0-1 range ---
+function normalizeSpeed(speed, DPR, minSpeed, maxForce) {
+    return Math.min(1, (speed / DPR - minSpeed) / (maxForce - minSpeed));
+}
+assertClose(normalizeSpeed(10, 2, 5, 40), 0, 'NormSpeed: at min threshold → 0');
+assertClose(normalizeSpeed(80, 2, 5, 40), 1, 'NormSpeed: at max → capped to 1');
+assertClose(normalizeSpeed(200, 2, 5, 40), 1, 'NormSpeed: beyond max → still 1');
+assert(normalizeSpeed(45, 2, 5, 40) > 0 && normalizeSpeed(45, 2, 5, 40) < 1, 'NormSpeed: mid-range → between 0 and 1');
+
+// --- Output ---
+const output = document.getElementById('output');
+let passed = 0, failed = 0;
+results.forEach(r => {
+    if (r.pass) { passed++; }
+    else { failed++; output.textContent += `FAIL: ${r.msg}\n`; }
+});
+output.textContent = `Results: ${passed} passed, ${failed} failed\n\n` + output.textContent;
+if (failed === 0) output.textContent += 'All tests passed.';
+output.style.color = failed === 0 ? '#4a4' : '#a44';
+</script>
+</body>
+</html>
