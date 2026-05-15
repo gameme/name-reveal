@@ -120,7 +120,7 @@ App.Config = {
     // --- Text rendering ---
     TEXT_GLOW_RADIUS: 12,          // glow blur radius (px); larger = softer halo
     TEXT_GLOW_COLOR:  '255, 200, 80', // RGB string for glow tint
-    MEET_OPACITY:     0.7,         // "Meet" label opacity
+    MEET_OPACITY:     0.5,         // "Meet" label opacity (dimmer than the name + date)
     SPARKLE_DECAY:    0.025,       // sparkle death rate; higher = shorter sparks
 
     // --- Typography ---
@@ -128,8 +128,8 @@ App.Config = {
     FONT_BASE_W:    0.15,
     FONT_BASE_H:    0.09,
     FONT_HERO:      1.15,  // name reveal (Raaga)
-    FONT_TITLE:     0.65,  // "Meet"
-    FONT_BODY:      0.3,   // birth date
+    FONT_TITLE:     0.45,  // "Meet"
+    FONT_BODY:      0.36,  // birth date
     FONT_CAPTION:   0.3,   // footer ("Made with love")
 
     // --- Layout (multipliers of base font) ---
@@ -147,13 +147,11 @@ App.Config = {
     MELODY_FADE_END:   0.5,      // scroll progress where melody reaches full volume
 
     // --- Debug ---
-    SHOW_PERF_HUD: false,
+    DEBUG: false,
     // Global time scale for the entire experience. 1.0 = normal, 0.1 = 10× slow-mo, 2.0 = double speed.
     TIME_SCALE: 1.0,
 
     // --- Blast ---
     // Lower = smoother/slower orb expansion; higher = snappier. Range: 0.1–0.5.
     BLAST_ORB_LERP: 0.22,
-
-    DEBUG: false,
 };

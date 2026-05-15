@@ -61,7 +61,16 @@ App.Audio = {
 
         this.masterGain = this.audioCtx.createGain();
         this.masterGain.gain.value = 1.0;
-        this.masterGain.connect(this.audioCtx.destination);
+
+        this.limiter = this.audioCtx.createDynamicsCompressor();
+        this.limiter.threshold.value = -6;
+        this.limiter.knee.value = 3;
+        this.limiter.ratio.value = 12;
+        this.limiter.attack.value = 0.002;
+        this.limiter.release.value = 0.1;
+
+        this.masterGain.connect(this.limiter);
+        this.limiter.connect(this.audioCtx.destination);
 
         this.droneGain = this.audioCtx.createGain();
         this.droneGain.gain.value = 0.1;

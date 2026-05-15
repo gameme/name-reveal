@@ -333,14 +333,17 @@ App.DualCore = (function() {
 
         // --- Compute position ---
         let x, y, alpha = 1;
-        const DESCENT_DURATION = 0.4;
 
         if (core.state === STATE.DESCENDING) {
+            const dx = dotTarget.x - core._descentFromX;
+            const dy = dotTarget.y - core._descentFromY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const descentDuration = Math.min(3.5, Math.max(1.0, dist / (orbRadius * 0.7)));
             const elapsed = time - core._descentStart;
-            const p = Math.min(1, elapsed / DESCENT_DURATION);
+            const p = Math.min(1, elapsed / descentDuration);
             const eased = easeOut(p);
-            x = core._descentFromX + (dotTarget.x - core._descentFromX) * eased;
-            y = core._descentFromY + (dotTarget.y - core._descentFromY) * eased;
+            x = core._descentFromX + dx * eased;
+            y = core._descentFromY + dy * eased;
             // Shrink to dot size
             coreR = coreR * (1 - eased * (1 - SETTLED_DOT_SCALE));
             alpha = 1 - eased * 0.3;

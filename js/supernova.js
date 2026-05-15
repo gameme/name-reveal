@@ -35,12 +35,18 @@ App.Supernova = {
             const curved = this.compression * this.compression * this.compression;
             target = 1 - curved * 0.95;
         } else if (this.flash > 0) {
-            target = 1 + this.flash * 0.8;
+            target = 1 + this.flash * 0.4;
+        } else if (this._smoothOrbScale < 0.15) {
+            target = this._smoothOrbScale;
         } else {
             target = 1;
         }
-        // Smooth large jumps (burst moment) over a few frames
+        const prev = this._smoothOrbScale;
         this._smoothOrbScale += (target - this._smoothOrbScale) * App.Config.BLAST_ORB_LERP;
+        if (App.Config.DEBUG) {
+            const jump = Math.abs(this._smoothOrbScale - prev);
+            if (jump > 0.1) App.dbgw('ORB_SCALE_JUMP: ' + prev.toFixed(3) + ' → ' + this._smoothOrbScale.toFixed(3) + ' (target=' + target.toFixed(3) + ' jump=' + jump.toFixed(3) + ')');
+        }
         return this._smoothOrbScale;
     },
 

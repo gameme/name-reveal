@@ -8,6 +8,15 @@ window.App = window.App || {};
     const ctx = canvas.getContext('2d');
     const hint = document.querySelector('.scroll-hint');
     const watermark = document.querySelector('.watermark');
+
+    // Low-res offscreen canvas for bloom (1/4 resolution — 16× less fill)
+    const bloomCanvas = document.createElement('canvas');
+    const bloomCtx = bloomCanvas.getContext('2d');
+    const BLOOM_SCALE = 0.25;
+    function resizeBloomCanvas() {
+        bloomCanvas.width = Math.ceil(App.W * BLOOM_SCALE);
+        bloomCanvas.height = Math.ceil(App.H * BLOOM_SCALE);
+    }
     const muteBtn = document.getElementById('muteBtn');
     const DPR = App.DPR;
 
@@ -22,6 +31,7 @@ window.App = window.App || {};
         canvas.style.height = vvH + 'px';
 
         App.H = newH;
+        resizeBloomCanvas();
     }
     resize();
     window.addEventListener('resize', resize);
@@ -38,7 +48,7 @@ window.App = window.App || {};
 
     // Selectable HUD overlay for LAN URL
     const debugHud = document.getElementById('debugHud');
-    if (C.SHOW_PERF_HUD && debugHud) {
+    if (C.DEBUG && debugHud) {
         debugHud.style.display = 'block';
         function updateHudUrl() {
             debugHud.textContent = window._lanUrl || 'resolving...';
@@ -297,11 +307,22 @@ window.App = window.App || {};
     let lastTime = Date.now();
     let _scaledTime = 0;
 
+    let _burstFrame = 0;
+
     function draw() {
         const now = Date.now();
         const rawDt = Math.min(32, now - lastTime);
         const dt = rawDt * C.TIME_SCALE;
         App.Footer.markInactive();
+
+        if (C.DEBUG && _burstFrame > 0 && _burstFrame <= 30) {
+            App.dbgw('FRAME[' + _burstFrame + ']: dt=' + rawDt + 'ms gap=' + (now - lastTime) + 'ms particles=' + App.Particles.aliveCount + ' sparkles=' + sparkles.length + ' flash=' + App.Supernova.flash.toFixed(3) + ' orbScale=' + App.Supernova._smoothOrbScale.toFixed(3));
+            _burstFrame++;
+        }
+        if (C.DEBUG && rawDt > 32 && _burstFrame === 0) {
+            App.dbgw('SLOW_FRAME: dt=' + rawDt + 'ms energy=' + orbEnergy.toFixed(1) + ' particles=' + App.Particles.aliveCount + ' progress=' + (currentScroll / (document.documentElement.scrollHeight - window.innerHeight || 1)).toFixed(3));
+        }
+
         lastTime = now;
 
         const W = App.W, H = App.H;
@@ -313,8 +334,8 @@ window.App = window.App || {};
 
         try {
 
-        const _t = [performance.now()];
-        function _m() { _t.push(performance.now()); }
+        const _t = C.DEBUG ? [performance.now()] : null;
+        function _m() { if (_t) _t.push(performance.now()); }
 
         ctx.clearRect(0, 0, W, H);
         ctx.fillStyle = '#050505';
@@ -407,7 +428,7 @@ window.App = window.App || {};
             App.Strings.checkInteraction(s, actualBaseX, freq, s, time, phase, amplitude, alpha, color);
         }
 
-        if (C.SHOW_PERF_HUD) App.Strings.drawProfileBar(ctx, W, H);
+        if (C.DEBUG) App.Strings.drawProfileBar(ctx, W, H);
 
         // TODO: Replace scattered timing constants with a phase-timeline abstraction
         // so formation, convergence, burst, and cycling don't drift out of sync.
@@ -497,7 +518,7 @@ window.App = window.App || {};
 
         // Orb
         if (orbForm > 0) {
-            const _orbStart = performance.now();
+            const _orbStart = C.DEBUG ? performance.now() : 0;
             const r = orbPulsedRadius;
             const orbAlpha = orbForm * energyBrightness;
             const breathe = 0.85 + 0.15 * Math.sin(time * 1.2);
@@ -531,38 +552,54 @@ window.App = window.App || {};
             coronaGrad.addColorStop(1, 'rgba(255, 150, 60, 0)');
             ctx.beginPath(); ctx.arc(cx, cy, coronaR, 0, Math.PI * 2); ctx.fillStyle = coronaGrad; ctx.fill();
 
-            // Additive bloom — screen-filling glow, drives the "staring at the sun" effect
-            const prevComp = ctx.globalCompositeOperation;
-            ctx.globalCompositeOperation = 'lighter';
+            // Additive bloom — rendered at 1/4 resolution then composited (game engine trick)
+            // The upscale acts as a natural Gaussian blur, making the bloom softer
+            if (App.Supernova.flash < 0.3) {
+            const _bloomStart = C.DEBUG ? performance.now() : 0;
+            const bs = BLOOM_SCALE;
+            const bw = bloomCanvas.width, bh = bloomCanvas.height;
+            bloomCtx.clearRect(0, 0, bw, bh);
 
-            // Inner bloom: always present, intensity driven by energy
+            const bcx = cx * bs, bcy = cy * bs, br = r * bs;
+
+            // Inner bloom
             const bloom1A = Math.min(0.5, orbAlpha * 0.3 * breathe);
-            const bloom1R = r * (1.6 + Math.min(1.5, orbEnergy * 0.1));
-            const bloomGrad1 = ctx.createRadialGradient(cx, cy, 0, cx, cy, bloom1R);
+            const bloom1R = br * (1.6 + Math.min(1.5, orbEnergy * 0.1));
+            const bloomGrad1 = bloomCtx.createRadialGradient(bcx, bcy, 0, bcx, bcy, bloom1R);
             bloomGrad1.addColorStop(0, `rgba(${coreR}, ${coreG}, ${coreB}, ${bloom1A})`);
             bloomGrad1.addColorStop(0.3, `rgba(255, 220, 160, ${bloom1A * 0.5})`);
             bloomGrad1.addColorStop(0.6, `rgba(255, 200, 120, ${bloom1A * 0.15})`);
             bloomGrad1.addColorStop(1, 'rgba(255, 180, 100, 0)');
-            ctx.beginPath(); ctx.arc(cx, cy, bloom1R, 0, Math.PI * 2);
-            ctx.fillStyle = bloomGrad1; ctx.fill();
+            bloomCtx.beginPath(); bloomCtx.arc(bcx, bcy, bloom1R, 0, Math.PI * 2);
+            bloomCtx.fillStyle = bloomGrad1; bloomCtx.fill();
 
-            // Outer bloom: grows dramatically with energy (the fun part)
+            // Outer bloom
             const outerBloomA = Math.min(0.3, orbEnergy * C.ENERGY_BLOOM_ALPHA);
             if (outerBloomA > 0.005) {
-                const bloom2R = r * (2.5 + Math.min(5, orbEnergy * C.ENERGY_BLOOM_SCALE));
-                const bloomGrad2 = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, bloom2R);
+                const bloom2R = br * (2.5 + Math.min(5, orbEnergy * C.ENERGY_BLOOM_SCALE));
+                const bloomGrad2 = bloomCtx.createRadialGradient(bcx, bcy, br * 0.3, bcx, bcy, bloom2R);
                 bloomGrad2.addColorStop(0, `rgba(255, 230, 180, ${outerBloomA})`);
                 bloomGrad2.addColorStop(0.3, `rgba(255, 210, 150, ${outerBloomA * 0.4})`);
                 bloomGrad2.addColorStop(0.6, `rgba(255, 190, 120, ${outerBloomA * 0.1})`);
                 bloomGrad2.addColorStop(1, 'rgba(255, 170, 100, 0)');
-                ctx.beginPath(); ctx.arc(cx, cy, bloom2R, 0, Math.PI * 2);
-                ctx.fillStyle = bloomGrad2; ctx.fill();
+                bloomCtx.beginPath(); bloomCtx.arc(bcx, bcy, bloom2R, 0, Math.PI * 2);
+                bloomCtx.fillStyle = bloomGrad2; bloomCtx.fill();
             }
 
+            // Composite the low-res bloom onto main canvas with additive blending
+            const prevComp = ctx.globalCompositeOperation;
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.drawImage(bloomCanvas, 0, 0, bw, bh, 0, 0, W, H);
             ctx.globalCompositeOperation = prevComp;
 
-            if (C.SHOW_PERF_HUD && !window._orbBloomMs) window._orbBloomMs = 0;
-            if (C.SHOW_PERF_HUD) window._orbBloomMs = performance.now() - _orbStart;
+            if (C.DEBUG) {
+                const _bloomMs = performance.now() - _bloomStart;
+                if (_bloomMs > 1 || orbEnergy > 3) App.dbgw('BLOOM: ' + _bloomMs.toFixed(2) + 'ms energy=' + orbEnergy.toFixed(1) + ' bloom1R=' + (bloom1R/bs/App.DPR).toFixed(0) + 'px bloom2R=' + (outerBloomA > 0.005 ? (br * (2.5 + Math.min(5, orbEnergy * C.ENERGY_BLOOM_SCALE))/bs/App.DPR).toFixed(0) : '0') + 'px particles=' + App.Particles.aliveCount + ' dt=' + rawDt + 'ms');
+            }
+            }
+
+            if (C.DEBUG && !window._orbBloomMs) window._orbBloomMs = 0;
+            if (C.DEBUG) window._orbBloomMs = performance.now() - _orbStart;
 
             // Dual-core: pre-burst orbiting inside the orb
             if (!State.photoBurst) {
@@ -643,7 +680,7 @@ window.App = window.App || {};
             const footerTargets = App.Footer.getTargets(fontSize, cx, H);
             const coreAlpha = Math.min(1, orbForm * 3);
             const coresActive = progress > 0.88;
-            App.DualCore.draw(ctx, cx, cy, orbPulsedRadius, coreAlpha, time, 0, true, coresActive, footerTargets);
+            App.DualCore.draw(ctx, cx, cy, orbMaxRadius, coreAlpha, time, 0, true, coresActive, footerTargets);
 
             if (App.DualCore.areBothOrbiting()) {
                 const cores = App.DualCore.getCorePositions();
@@ -688,21 +725,21 @@ window.App = window.App || {};
                 App.dbg('MILESTONE: reveal started, phase=' + State.phaseName);
                 State.enter(time, formationTime);
             }
-            const _r = [performance.now()];
+            const _r = C.DEBUG ? [performance.now()] : null;
             const textP = easeOutQuint(Math.min(1, revealProgress / 0.15));
             const photoDelay = formationTime + C.PHOTO_DELAY_AFTER_FORMATION;
             const photoP = revealElapsed > photoDelay ? easeOutQuint(Math.min(1, (revealElapsed - photoDelay) / C.PHOTO_FADE_DURATION)) : 0;
             const glowPulse = 0.85 + 0.15 * Math.sin(time * 1.5);
 
-            // "Meet" — appears instantly with the photo reveal
+            // "Meet" — appears instantly with the photo reveal; rendered flat (no glow) so the name + date carry the visual weight.
             if (photoP > 0) {
                 const meetSize = fontSize * C.FONT_TITLE;
                 ctx.font = `200 ${meetSize}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
                 ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                 ctx.fillStyle = `rgba(255, 240, 210, ${C.MEET_OPACITY})`;
-                drawGlowText('Meet', cx, cy - orbMaxRadius - meetSize * 1.2, 0.6);
+                ctx.fillText('Meet', cx, cy - orbMaxRadius - meetSize * 1.2);
             }
-            _r.push(performance.now());
+            if (_r) _r.push(performance.now());
 
             const letterPositions = cachedLetterPositions;
 
@@ -763,9 +800,9 @@ window.App = window.App || {};
             }
 
             // Sparkles
-            _r.push(performance.now());
+            if (_r) _r.push(performance.now());
             updateAndDrawSparkles();
-            _r.push(performance.now());
+            if (_r) _r.push(performance.now());
 
             if (revealElapsed >= formationTime && !State.photoBurst && letterPositions) {
                 ctx.font = `${fontSize * C.FONT_HERO}px Nistha, Georgia, serif`;
@@ -827,30 +864,53 @@ window.App = window.App || {};
                     }
                 }
             }
-            _r.push(performance.now());
+            if (_r) _r.push(performance.now());
 
             // Photo
-            const _rp = performance.now();
+            const _rp = C.DEBUG ? performance.now() : 0;
             if (photoP > 0 && babyImg.complete) {
                 if (!State.photoBurst) {
                     State.photoBurst = true;
                     State.markComplete();
-                    App.dbg('MILESTONE: SUPERNOVA BURST — photo revealed');
-                    App.Audio.stopCompression();
-                    App.Audio.playBurst();
-                    App.Audio.playSingingBowl();
-                    App.Audio.startMelody();
-                    App.Supernova.trigger(cx, cy, orbMaxRadius, sparkles);
+                    if (C.DEBUG) _burstFrame = 1;
+                    if (C.DEBUG) {
+                        const _b0 = performance.now();
+                        App.Audio.stopCompression();
+                        const _b1 = performance.now();
+                        App.Audio.playBurst();
+                        const _b2 = performance.now();
+                        App.Audio.playSingingBowl();
+                        const _b3 = performance.now();
+                        App.Audio.startMelody();
+                        const _b4 = performance.now();
+                        App.Supernova.trigger(cx, cy, orbMaxRadius, sparkles);
+                        const _b5 = performance.now();
+                        App.dbg('BURST_TIMING: stopComp=' + (_b1-_b0).toFixed(2) + ' playBurst=' + (_b2-_b1).toFixed(2) + ' bowl=' + (_b3-_b2).toFixed(2) + ' melody=' + (_b4-_b3).toFixed(2) + ' trigger=' + (_b5-_b4).toFixed(2) + ' total=' + (_b5-_b0).toFixed(2) + 'ms');
+                    } else {
+                        App.Audio.stopCompression();
+                        App.Audio.playBurst();
+                        App.Audio.playSingingBowl();
+                        App.Audio.startMelody();
+                        App.Supernova.trigger(cx, cy, orbMaxRadius, sparkles);
+                    }
                 }
                 ctx.globalAlpha = photoP * textP;
                 const photoRadius = orbMaxRadius * 0.92;
-                const photo = App.Cache.circularPhoto(babyImg, photoRadius);
-                ctx.drawImage(photo, cx - photoRadius, cy - photoRadius);
+                if (C.DEBUG) {
+                    const _pc0 = performance.now();
+                    const photo = App.Cache.circularPhoto(babyImg, photoRadius);
+                    const _pc1 = performance.now();
+                    if (_pc1 - _pc0 > 1) App.dbgw('PHOTO_CACHE: ' + (_pc1-_pc0).toFixed(2) + 'ms (first render or resize)');
+                    ctx.drawImage(photo, cx - photoRadius, cy - photoRadius);
+                } else {
+                    const photo = App.Cache.circularPhoto(babyImg, photoRadius);
+                    ctx.drawImage(photo, cx - photoRadius, cy - photoRadius);
+                }
                 ctx.globalAlpha = 1;
             }
-            const _rd = performance.now();
+            const _rd = C.DEBUG ? performance.now() : 0;
 
-            // Birth date — revealed by the cores as they pass through
+            // Birth date — revealed by the cores as they pass through; carries the glow that "Meet" used to.
             if (photoP >= 1) {
                 const dateSize = fontSize * C.FONT_BODY;
                 const dateY = belowY + fontSize * C.DATE_OFFSET_Y;
@@ -859,8 +919,8 @@ window.App = window.App || {};
                 if (dateP > 0) {
                     ctx.font = `300 ${dateSize}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
                     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                    ctx.fillStyle = `rgba(255, 240, 210, ${textP * dateP * 0.5})`;
-                    ctx.fillText(C.BIRTH_DATE, cx, dateY);
+                    ctx.fillStyle = `rgba(255, 240, 210, ${textP * dateP * 0.7})`;
+                    drawGlowText(C.BIRTH_DATE, cx, dateY, textP * dateP * 0.6);
                 }
             }
 
@@ -868,11 +928,11 @@ window.App = window.App || {};
             if (!App.Footer.isComplete() && (photoP >= 1 || App.Footer.isPrimaryDone())) {
                 App.Footer.draw(ctx, time, textP, fontSize, cx, H);
             }
-            const _re = performance.now();
-            _r.push(_re);
+            const _re = C.DEBUG ? performance.now() : 0;
+            if (_r) _r.push(_re);
 
             // Reveal sub-timing HUD
-            if (C.SHOW_PERF_HUD) {
+            if (C.DEBUG) {
                 const rLabels = ['meet', 'formation', 'sparkles', 'hold/cycle', 'photo', 'footer'];
                 const rTimes = [_r[1]-_r[0], _r[2]-_r[1], _r[3]-_r[2], _r[4]-_r[3], _rd-_rp, _re-_rd];
                 const rY = 120 * DPR;
@@ -899,7 +959,7 @@ window.App = window.App || {};
         App.Supernova.renderEffects(ctx, cx, cy, W, H);
 
         _m();
-        if (C.SHOW_PERF_HUD) {
+        if (C.DEBUG) {
             const sections = ['clear', 'rays+str', 'particles', 'orb', 'dualcore', 'reveal'];
             const times = []; for (let i = 1; i < _t.length; i++) times.push(_t[i] - _t[i-1]);
             const total = _t[_t.length - 1] - _t[0];
@@ -933,10 +993,18 @@ window.App = window.App || {};
             const avgSections = sections.map((_, idx) => { let sum = 0, count = 0; window._perfHistory.sections.forEach(s => { if (s[idx] !== undefined) { sum += s[idx]; count++; } }); return count > 0 ? sum / count : 0; });
             let worstIdx = 0; avgSections.forEach((v, i) => { if (v > avgSections[worstIdx]) worstIdx = i; });
             ctx.font = `${11 * DPR}px monospace`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-            ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, 320 * DPR, 85 * DPR);
+            ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, 320 * DPR, 100 * DPR);
             ctx.fillStyle = fps > 50 ? '#4a4' : fps > 30 ? '#aa4' : '#a44';
             ctx.fillText(`FPS: ${fps.toFixed(0)}  Frame: ${total.toFixed(1)}ms  Avg: ${avgTotal.toFixed(1)}ms  Particles: ${App.Particles.aliveCount}  Energy: ${orbEnergy.toFixed(1)}`, 8 * DPR, 6 * DPR);
-            let y = 22 * DPR;
+
+            // GPU-bound indicator: CPU is fast but frames are slow → GPU fill bottleneck
+            const gpuBound = rawDt > 32 && total < 8;
+            const gpuLabel = gpuBound ? 'GPU-BOUND' : 'gpu ok';
+            const bloomR2 = orbEnergy > 0 ? Math.round((orbPulsedRadius * (2.5 + Math.min(5, orbEnergy * C.ENERGY_BLOOM_SCALE))) / DPR) : 0;
+            ctx.fillStyle = gpuBound ? '#f44' : '#6a6';
+            ctx.fillText(`${gpuLabel}  dt=${rawDt}ms  bloom=${bloomR2}px  orbScale=${App.Supernova._smoothOrbScale.toFixed(2)}`, 8 * DPR, 18 * DPR);
+
+            let y = 34 * DPR;
             sections.forEach((name, i) => { const ms = avgSections[i] || 0; const bar = Math.min(200, ms * 20); const isW = i === worstIdx && ms > 1; ctx.fillStyle = isW ? '#f84' : '#8a8'; ctx.fillRect(8 * DPR, y, bar * DPR, 9 * DPR); ctx.fillStyle = isW ? '#fca' : '#cec'; ctx.fillText(`${name}: ${ms.toFixed(1)}ms`, (bar + 12) * DPR + 8 * DPR, y - 1); y += 12 * DPR; });
         }
 

@@ -199,7 +199,7 @@ App.Footer = (function() {
         const w = measureWidths(ctx, font);
 
         const totalW = w.made + w.withHeart * shiftP + w.main + w.vinod * shiftP;
-        let xPos = cx - totalW / 2;
+        let xPos = Math.round(cx - totalW / 2);
 
         // "Made"
         ctx.globalAlpha = primaryP * envelope * 0.6;
@@ -214,7 +214,8 @@ App.Footer = (function() {
             ctx.fillText(SEGMENTS.withText, xPos, footerY);
 
             const heartX = xPos + w.withText;
-            const heartbeat = settled ? Math.abs(Math.sin(time * 2.5)) * 0.3 : 0;
+            const heartRaw = settled ? Math.abs(Math.sin(time * 2.5)) * 0.3 : 0;
+            const heartbeat = heartRaw * Math.min(1, shrutiGlowP * 5);
             const hScale = 1 + heartbeat * 0.4;
             const hW = w.heart * hScale;
             const hH = heartCanvas.height * hScale;
@@ -232,49 +233,37 @@ App.Footer = (function() {
         ctx.globalAlpha = primaryP * envelope * 0.6;
         ctx.fillText('in California by ', xPos, footerY);
         const shrutiStartX = xPos + w._prefix;
-        if (shrutiP > 0) {
-            ctx.fillStyle = 'rgba(255, 240, 210, 1)';
-            drawEmanating(ctx, w._shrutiChars, w._shrutiIIndex, shrutiStartX, footerY, shrutiP, envelope * 0.6);
-        }
-        xPos += w.main;
-
-        // "& Vinod" (emanating from 'i')
-        if (vinodP > 0) {
-            ctx.fillStyle = 'rgba(255, 220, 200, 1)';
-            drawEmanating(ctx, w._vinodChars, w._vinodIIndex, xPos, footerY, vinodP, primaryP * envelope * 0.6);
-        }
 
         // Persistent glow behind names (starts only after everything is settled)
         if (settled && shrutiGlowP < 1) {
-            shrutiGlowP = Math.min(1, shrutiGlowP + dt * 0.4);
+            shrutiGlowP = Math.min(1, shrutiGlowP + dt * 0.12);
         }
-        if (shrutiGlowP > 0) {
-            const glowIntensity = shrutiGlowP * envelope * 0.7;
-            ctx.fillStyle = 'rgba(255, 240, 210, 1)';
-            ctx.shadowColor = `rgba(255, 180, 80, ${glowIntensity})`;
-            ctx.shadowBlur = footerSize * 0.8 * shrutiGlowP;
-            let sx = shrutiStartX;
-            for (let i = 0; i < w._shrutiChars.length; i++) {
-                ctx.globalAlpha = shrutiGlowP * envelope * 0.6;
-                ctx.fillText(w._shrutiChars[i].char, sx, footerY);
-                sx += w._shrutiChars[i].w;
+
+        if (shrutiP > 0) {
+            const eased = shrutiGlowP * shrutiGlowP;
+            if (eased > 0) {
+                ctx.shadowColor = `rgba(255, 180, 80, ${eased * envelope * 0.7})`;
+                ctx.shadowBlur = footerSize * 0.8 * eased;
             }
+            ctx.fillStyle = 'rgba(255, 240, 210, 1)';
+            drawEmanating(ctx, w._shrutiChars, w._shrutiIIndex, shrutiStartX, footerY, shrutiP, envelope * 0.6);
             ctx.shadowBlur = 0;
         }
+        xPos += w.main;
+
         if (settled && vinodGlowP < 1) {
-            vinodGlowP = Math.min(1, vinodGlowP + dt * 0.4);
+            vinodGlowP = Math.min(1, vinodGlowP + dt * 0.12);
         }
-        if (vinodGlowP > 0) {
-            const glowIntensity = vinodGlowP * envelope * 0.7;
-            ctx.fillStyle = 'rgba(255, 220, 200, 1)';
-            ctx.shadowColor = `rgba(150, 180, 255, ${glowIntensity})`;
-            ctx.shadowBlur = footerSize * 0.8 * vinodGlowP;
-            let vx = xPos;
-            for (let i = 0; i < w._vinodChars.length; i++) {
-                ctx.globalAlpha = vinodGlowP * primaryP * envelope * 0.6;
-                ctx.fillText(w._vinodChars[i].char, vx, footerY);
-                vx += w._vinodChars[i].w;
+
+        // "& Vinod" (emanating from 'i')
+        if (vinodP > 0) {
+            const eased = vinodGlowP * vinodGlowP;
+            if (eased > 0) {
+                ctx.shadowColor = `rgba(150, 180, 255, ${eased * envelope * 0.7})`;
+                ctx.shadowBlur = footerSize * 0.8 * eased;
             }
+            ctx.fillStyle = 'rgba(255, 220, 200, 1)';
+            drawEmanating(ctx, w._vinodChars, w._vinodIIndex, xPos, footerY, vinodP, primaryP * envelope * 0.6);
             ctx.shadowBlur = 0;
         }
 
