@@ -33,7 +33,7 @@ window.addEventListener('unhandledrejection', function(e) {
 
         window._errorLog = [];
         var orig = { log: console.log, warn: console.warn, error: console.error };
-        var MAX_ENTRIES = 100;
+        var MAX_ENTRIES = App.Config.LOG_MAX_ENTRIES;
 
         function capture(level, args) {
             var msg = '[' + level + '] ' + Array.from(args).map(function(a) {
@@ -58,7 +58,7 @@ window.addEventListener('unhandledrejection', function(e) {
             var payload = window._errorLog.join('\n');
             window._errorLog = [];
             try { fetch('/log', { method: 'POST', body: payload, keepalive: true }).catch(function(){}); } catch(e) {}
-        }, 3000);
+        }, App.Config.LOG_FLUSH_INTERVAL_MS);
 
         App.dbg('BEACON_INIT: page loaded, DPR=' + window.devicePixelRatio + ', screen=' + screen.width + 'x' + screen.height);
     });

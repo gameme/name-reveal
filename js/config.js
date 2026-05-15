@@ -5,11 +5,11 @@ App.Config = {
     // Each pair maps scroll progress (0–1) to a phase intensity (0–1).
     // Wider range = slower transition; narrower = snappier.
     STRING_APPEAR:    [0.04, 0.12],  // strings fade in
-    VIBRATION:        [0.05, 0.45],  // string wave amplitude ramps up
-    ORB_FORM:         [0.2, 0.45],   // orb fades in
-    ORB_GROW:         [0.4, 0.65],   // orb expands to full size
-    STRINGS_FADE:     [0.6, 0.75],   // strings fade out as orb dominates
-    REVEAL:           [0.75, 0.88],  // name reveal + supernova trigger zone
+    VIBRATION:        [0.05, 0.6],  // string wave amplitude ramps up
+    ORB_FORM:         [0.06, 0.35],   // orb fades in
+    ORB_GROW:         [0.3, 0.75],   // orb expands to full size
+    STRINGS_FADE:     [0.7, 0.85],   // strings fade out as orb dominates
+    REVEAL:           [0.85, 0.95],  // name reveal + supernova trigger zone
 
     // --- Particles ---
     MAX_PARTICLES:       800,   // pool cap; higher = denser but heavier on GPU
@@ -30,6 +30,10 @@ App.Config = {
     // --- Pointer trail (post-reveal interactive) ---
     POINTER_TRAIL_SIZE_MIN: 2.0, // smallest trail particle
     POINTER_TRAIL_SIZE_MAX: 4.0, // largest trail particle
+    POINTER_TRAIL_CHANCE:   0.6, // per-frame spawn chance when pointer is moving
+    POINTER_TRAIL_SPEED_MIN: 2,  // min pointer speed (× DPR) to emit
+    POINTER_TRAIL_DRIFT_MIN: 0.3, // upward drift floor
+    POINTER_TRAIL_DRIFT_RANGE: 0.5, // upward drift random range
 
     // --- Ambient particles (orbit around orb) ---
     AMBIENT_SPAWN_CHANCE: 0.3,   // base probability per frame; higher = more particles
@@ -62,6 +66,20 @@ App.Config = {
     STRING_DISSOLVE_CHANCE: 0.25, // particle emission chance per frame during fade
     STRING_AURORA_GLOW_MAX: 28,   // max outer glow width (px before DPR) at full orbGrow
     STRING_AURORA_FREQ_MULT: 0.2, // wave freq multiplier at full aurora (lower = longer waves)
+    AURORA_ECHO_SEND_MAX: 1.8,   // max echo wet level at full aurora
+    AURORA_TRAIL_COUNT: 3,        // ghost afterimage count
+    AURORA_TRAIL_ALPHA_BASE: 0.04,// base opacity per trail layer
+    AURORA_TRAIL_FRAME_SKIP: 3,   // frames between trail captures
+
+    // --- Strum wave model (transverse waves injected into a string by a pluck) ---
+    STRUM_WAVE_FREQ_MIN:    6,     // base spatial frequency for new waves
+    STRUM_WAVE_FREQ_RANGE:  4,     // random range added on top
+    STRUM_WAVE_AMP_SCALE:   0.015, // amplitude per unit pluck intensity (0–1)
+    STRUM_WAVE_SPEED_MIN:   0.012, // base wave travel speed (units of pos per frame)
+    STRUM_WAVE_SPEED_INTENSITY_GAIN: 0.008, // additional speed per unit intensity (slope, not random)
+    STRUM_WAVE_DECAY:       0.997, // amplitude decay per frame
+    STRUM_WAVE_CAP:         16,    // max simultaneous waves per string (oldest evicted)
+    STRUM_WAVE_FALLOFF_HALF_WIDTH: 0.08, // ± half-width of wave's spatial influence (NOT additive — used as bound)
 
     // --- Orb ---
     ORB_MIN_RADIUS_PX:  8,     // starting radius before growth
@@ -98,12 +116,91 @@ App.Config = {
     LETTER_SPAWN_DIST_MIN: 0.8,     // closest swarm spawn (× font size)
     LETTER_SPAWN_DIST_MAX: 3.3,     // farthest swarm spawn
     LETTER_POP_SCALE:     0.35,     // overshoot scale when letter appears (0.15 = 15%)
+    LETTER_SWARM_PHASE_END: 0.6,    // letterProgress at which swarm phase ends
+    LETTER_MATERIALIZE_PHASE_START: 0.4, // letterProgress at which materialize starts; must be < LETTER_SWARM_PHASE_END so the two windows overlap (drives the visual crossfade), and must be < 1 to avoid divide-by-zero in materializePhase
+    LETTER_BURST_TRIGGER_PHASE: 0.15, // materializePhase at which sparkle burst fires
+    LETTER_SPARKLE_COUNT:    30,    // sparkles spawned per letter materialization
+    LETTER_SPARKLE_SPEED_MIN: 3,    // sparkle ejection speed floor
+    LETTER_SPARKLE_SPEED_RANGE: 5,  // additional random speed
+    LETTER_SPARKLE_SIZE_MIN: 2.5,   // sparkle size floor (× DPR)
+    LETTER_SPARKLE_SIZE_RANGE: 3,   // additional random size
+    LETTER_SPARKLE_ANGLE_JITTER: 0.4, // random angular jitter (radians)
+    LETTER_SWARM_SPEED_BASE: 0.015, // base inward speed for swarm particles
+    LETTER_SWARM_SPEED_PHASE_GAIN: 0.02, // additional speed per unit swarmPhase (slope, not random)
+    TEXT_FADE_PROGRESS:     0.15,   // revealProgress over which textP ramps in (0→1)
 
     // --- Supernova ---
     PHOTO_DELAY_AFTER_FORMATION: 6, // seconds of compression build before photo reveal
     PHOTO_FADE_DURATION: 2,         // seconds for photo to fade in after burst
+    PHOTO_RADIUS_PCT:    0.92,      // photo radius as fraction of orbMaxRadius
+    DATE_FADE_START:     0.25,      // core flight progress at which date starts fading in
+    DATE_FADE_DURATION:  0.3,       // core flight progress range over which date fades in
     BURST_TEXT_SCALE:    0.75,       // how much the name scales up at burst (0.35 = 35%)
     BURST_TEXT_GLOW:     2.5,        // glow intensity boost at burst
+
+    // --- Burst (supernova trigger explosion) ---
+    BURST_PARTICLE_COUNT_MIN:   450,    // baseline burst particle count
+    BURST_PARTICLE_COUNT_RANGE: 100,    // additional random
+    BURST_PARTICLE_SPEED_MIN:   3,      // outward speed floor (× DPR)
+    BURST_PARTICLE_SPEED_RANGE: 14,     // additional random speed
+    BURST_PARTICLE_DIST_BASE:   0.8,    // spawn shell inner edge (× orbMaxRadius)
+    BURST_PARTICLE_DIST_RANGE:  0.5,    // shell thickness
+    BURST_SPARKLE_COUNT:        60,     // sparkle count emitted with the burst
+    BURST_SPARKLE_SPEED_MIN:    4,      // sparkle speed floor
+    BURST_SPARKLE_SPEED_RANGE:  6,      // additional random speed
+    BURST_SPARKLE_SIZE_MIN:     3,      // sparkle size floor (× DPR)
+    BURST_SPARKLE_SIZE_RANGE:   4,      // additional random size
+    BURST_FLASH_DECAY:          0.945,  // per-frame multiplier on full-screen flash
+    BURST_RING_DECAY:           0.96,   // per-frame multiplier on shockwave ring
+    BURST_RING_GROWTH_PX:       12,     // ring radius growth per frame (× DPR)
+
+    // --- Screen shake (applied at burst) ---
+    SHAKE_INITIAL:       1.5,    // initial shake intensity at burst
+    SHAKE_DECAY:         0.9,    // per-frame decay
+    SHAKE_MAGNITUDE_PX:  20,     // peak displacement at intensity=1 (× DPR)
+
+    // --- Vortex (compression-driven inward particle pull) ---
+    VORTEX_THRESHOLD:               0.3,  // compression value above which vortex spawns particles (must be < 1)
+    VORTEX_FINAL_RUSH_THRESHOLD:    0.75, // compression value at which the final rush kicks in (must be < 1; denom is 1 - threshold)
+
+    // --- Ripples (compression spacetime ripples) ---
+    RIPPLE_THRESHOLD:    0.5,    // compression value above which ripples spawn (must be < 1; NaN at 1.0 leaks into _ripples list)
+    RIPPLE_DECAY:        0.96,   // per-frame alpha decay
+
+    // --- Compression collapse factor (shared depth of collapse during compression) ---
+    // Applied uniformly to orb scale (Supernova), ray scale (Supernova), and dual-core separation.
+    // Tuning this single knob keeps the three subsystems visually in sync.
+    COMPRESSION_COLLAPSE_FACTOR: 0.95,
+
+    // --- Ray burst (post-supernova outward ray expansion) ---
+    RAY_BURST_DECAY:     0.94,   // per-frame decay of the burst-driven ray boost
+    RAY_BURST_SCALE:     2.5,    // additional ray length multiplier at full burst
+
+    // --- Tap burst (post-reveal interactive) ---
+    TAP_BURST_COUNT_MIN:    15,   // particles spawned per tap (floor)
+    TAP_BURST_COUNT_RANGE:  10,   // additional random
+    TAP_BURST_SPEED_MIN:    1.5,  // ejection speed floor (× DPR)
+    TAP_BURST_SPEED_RANGE:  3,    // additional random
+    TAP_BURST_ANGLE_JITTER: 0.4,  // random angular jitter (radians)
+
+    // --- Core collision (pre-burst, when the two cores pass close inside the orb) ---
+    CORE_COLLISION_THRESHOLD_PCT: 0.3,  // proximity (× orbRadius) at which collision begins
+    CORE_COLLISION_ORB_GROW_MIN:  0.1,  // gate: only collide once orb has formed past this
+    CORE_COLLISION_EXPEL_CHANCE:  0.6,  // per-frame chance to expel particles at full proximity
+    CORE_COLLISION_BURST_MIN:     1,    // expelled particle count floor
+    CORE_COLLISION_BURST_RANGE:   3,    // additional count scaling with proximity
+    CORE_COLLISION_SPEED_MIN:     3,    // ejection speed floor (× DPR)
+    CORE_COLLISION_SPEED_RANGE:   5,    // additional random
+    CORE_COLLISION_ESCAPE_BOOST:  3,    // multiplier on speed scaling with orbPull (helps escape orb)
+
+    // --- Dual-core (orbits, scales, lifecycle) ---
+    DUAL_CORE_SIZE_PCT:           0.08, // core radius as fraction of orb radius
+    DUAL_CORE_INNER_ORBIT_PCT:    1.0,  // pre-burst orbit radius (× orbRadius)
+    DUAL_CORE_OUTER_ORBIT_PCT:    1.3,  // post-burst idle orbit radius
+    DUAL_CORE_SETTLED_DOT_SCALE:  0.3,  // size factor when settled on the 'i' dot
+    DUAL_CORE_TRAIL_COUNT:        8,    // trail-segment count
+    DUAL_CORE_ORBIT_SPEED_A:      1.8,  // angular speed of core A (rad/sec)
+    DUAL_CORE_ORBIT_SPEED_B:     -1.3,  // angular speed of core B (negative = opposite direction)
 
     // --- Font cycling (post-reveal name display) ---
     FONT_HOLD_DURATION:      6,   // seconds each font is shown
@@ -148,6 +245,8 @@ App.Config = {
 
     // --- Debug ---
     DEBUG: false,
+    LOG_MAX_ENTRIES:       100,    // ring buffer cap for the debug log
+    LOG_FLUSH_INTERVAL_MS: 3000,   // beacon flush cadence (POSTs to /log)
     // Global time scale for the entire experience. 1.0 = normal, 0.1 = 10× slow-mo, 2.0 = double speed.
     TIME_SCALE: 1.0,
 

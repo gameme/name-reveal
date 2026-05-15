@@ -8,6 +8,8 @@ App.Strings = {
     init() {
         const C = App.Config;
         this.plucks = Array.from({ length: C.NUM_STRINGS }, () => ({ y: 0, offset: 0, glow: 0, glowSpread: 0 }));
+        this._trails = Array.from({ length: C.NUM_STRINGS }, () => []);
+        this._trailFrame = 0;
     },
 
     getLockKey(pointerId, stringIdx) {
@@ -147,6 +149,26 @@ App.Strings = {
 
         // During fade: string becomes more translucent
         const fadeAlpha = alpha * (1 - stringsFade * 0.7);
+
+        // Visual echo trails: ghost afterimages when aurora is active
+        if (auroraBlend > 0.3) {
+            const trails = this._trails[s];
+            this._trailFrame++;
+            if (this._trailFrame % C.AURORA_TRAIL_FRAME_SKIP === 0) {
+                trails.push(path);
+                if (trails.length > C.AURORA_TRAIL_COUNT) trails.shift();
+            }
+            for (let ti = 0; ti < trails.length; ti++) {
+                const trailAge = (trails.length - ti) / trails.length;
+                const trailAlpha = C.AURORA_TRAIL_ALPHA_BASE * (1 - trailAge) * auroraBlend * fadeAlpha;
+                if (trailAlpha < 0.005) continue;
+                ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${trailAlpha})`;
+                ctx.lineWidth = (3 + auroraBlend * 2) * DPR * (1 - trailAge * 0.5);
+                ctx.stroke(trails[ti]);
+            }
+        } else if (this._trails[s].length > 0) {
+            this._trails[s].length = 0;
+        }
 
         // Aurora glow: multi-layer bloom widens with orbGrow
         const auroraGlow = C.STRING_AURORA_GLOW_MAX * auroraBlend * DPR;

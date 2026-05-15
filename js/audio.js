@@ -12,6 +12,7 @@ App.Audio = {
     phase: AUDIO_PHASE.UNINITIALIZED,
     muted: false,
     lastUpdate: 0,
+    auroraBlend: 0,
     droneAudio: null,
     melodyAudio: null,
 
@@ -104,6 +105,26 @@ App.Audio = {
 
         this.phase = AUDIO_PHASE.PLAYING;
         this._ensureChimeReverb();
+        this._reverbSendGain = this.audioCtx.createGain();
+        this._reverbSendGain.gain.value = 0;
+        this._reverbSendGain.connect(this._chimeReverb);
+
+        // Echo delay line for aurora strings
+        this._echoDelay = this.audioCtx.createDelay(1.0);
+        this._echoDelay.delayTime.value = 0.18;
+        this._echoFeedback = this.audioCtx.createGain();
+        this._echoFeedback.gain.value = 0.35;
+        this._echoSend = this.audioCtx.createGain();
+        this._echoSend.gain.value = 0;
+        this._echoFilter = this.audioCtx.createBiquadFilter();
+        this._echoFilter.type = 'lowpass';
+        this._echoFilter.frequency.value = 3000;
+        this._echoSend.connect(this._echoDelay);
+        this._echoDelay.connect(this._echoFilter);
+        this._echoFilter.connect(this._echoFeedback);
+        this._echoFeedback.connect(this._echoDelay);
+        this._echoFilter.connect(this.masterGain);
+
         App.dbg('AUDIO: initialized, sampleRate=' + this.audioCtx.sampleRate + ' state=' + this.audioCtx.state);
         if (muteBtn) muteBtn.classList.add('visible');
     },
@@ -167,6 +188,12 @@ App.Audio = {
         osc3.connect(g3); g3.connect(gain);
         osc4.connect(g4); g4.connect(gain);
         gain.connect(this.masterGain);
+
+        if (this.auroraBlend > 0.3 && this._echoSend) {
+            const sendLevel = (this.auroraBlend - 0.3) / 0.7 * App.Config.AURORA_ECHO_SEND_MAX;
+            this._echoSend.gain.setValueAtTime(sendLevel, t);
+            gain.connect(this._echoSend);
+        }
 
         osc1.start(t); osc2.start(t); osc3.start(t); osc4.start(t);
         osc1.stop(t + decay + 0.05);

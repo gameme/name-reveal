@@ -1,18 +1,19 @@
 window.App = window.App || {};
 
 App.DualCore = (function() {
+    const C = App.Config;
     const TWO_PI = Math.PI * 2;
 
-    const ORBIT_SPEED_A = 1.8;
-    const ORBIT_SPEED_B = -1.3;
+    const ORBIT_SPEED_A = C.DUAL_CORE_ORBIT_SPEED_A;
+    const ORBIT_SPEED_B = C.DUAL_CORE_ORBIT_SPEED_B;
     const PHASE_OFFSET = Math.PI;
-    const INNER_ORBIT = 1.0;
-    const OUTER_ORBIT = 1.3;
-    const CORE_SIZE = 0.08;
-    const TRAIL_COUNT = 8;
+    const INNER_ORBIT = C.DUAL_CORE_INNER_ORBIT_PCT;
+    const OUTER_ORBIT = C.DUAL_CORE_OUTER_ORBIT_PCT;
+    const CORE_SIZE = C.DUAL_CORE_SIZE_PCT;
+    const TRAIL_COUNT = C.DUAL_CORE_TRAIL_COUNT;
     const EXPEL_ANGLE_A = Math.PI + 0.3;
     const EXPEL_ANGLE_B = -0.3;
-    const SETTLED_DOT_SCALE = 0.3;
+    const SETTLED_DOT_SCALE = C.DUAL_CORE_SETTLED_DOT_SCALE;
 
     const STATE = { ORBITING_INSIDE: 0, ORBITING_OUTSIDE: 1, FLYING: 2, DESCENDING: 3, SETTLED: 4, DONE: 5 };
 
@@ -198,9 +199,14 @@ App.DualCore = (function() {
         core.cpY = cp.y;
     }
 
-    function draw(ctx, cx, cy, orbRadius, orbAlpha, time, compression, hasBurst, revealActive, footerTargets) {
+    function draw(ctx, cx, cy, orbRadius, orbAlpha, time, compression, hasBurst, revealActive, footerTargets, expelRadius) {
         if (orbRadius <= 0) return;
         const coreR = orbRadius * CORE_SIZE;
+        // expelRadius pins the burst-moment expel position to a stable border (orbMaxRadius).
+        // At the burst frame, orbRadius (= orbPulsedRadius) is still small from compression collapse,
+        // so without this the cores would launch from inside the photo instead of its border.
+        // Falls back to orbRadius if not provided so pre-burst rendering is unaffected.
+        const expelR = expelRadius !== undefined ? expelRadius : orbRadius;
 
         // --- Pre-burst: orbiting inside ---
         if (!hasBurst) {
@@ -208,7 +214,7 @@ App.DualCore = (function() {
             coreB.state = STATE.ORBITING_INSIDE;
 
             const curved = compression * compression * compression;
-            const separation = 1 - curved * 0.95;
+            const separation = 1 - curved * C.COMPRESSION_COLLAPSE_FACTOR;
             const orbitR = orbRadius * INNER_ORBIT * separation;
 
             const angleA = time * ORBIT_SPEED_A;
@@ -253,14 +259,14 @@ App.DualCore = (function() {
             else {
                 const T = App.Footer.TIMING;
                 const photoFade = App.Config.PHOTO_FADE_DURATION;
-                initCoreFlight(coreA, cx, cy, orbRadius, EXPEL_ANGLE_A, time, photoFade + T.primaryDelay + T.primaryFadeDuration * 0.6, footerTargets.shruti.x, footerTargets.shruti.y);
+                initCoreFlight(coreA, cx, cy, expelR, EXPEL_ANGLE_A, time, photoFade + T.primaryDelay + T.primaryFadeDuration * 0.6, footerTargets.shruti.x, footerTargets.shruti.y);
             }
 
             if (App.Footer.isSecondaryStarted()) { coreB.state = STATE.DONE; }
             else {
                 const T = App.Footer.TIMING;
                 const photoFade = App.Config.PHOTO_FADE_DURATION;
-                initCoreFlight(coreB, cx, cy, orbRadius, EXPEL_ANGLE_B, time, photoFade + T.primaryDelay + T.shiftDelay + T.revealDuration * 0.6, footerTargets.vinod.x, footerTargets.vinod.y);
+                initCoreFlight(coreB, cx, cy, expelR, EXPEL_ANGLE_B, time, photoFade + T.primaryDelay + T.shiftDelay + T.revealDuration * 0.6, footerTargets.vinod.x, footerTargets.vinod.y);
             }
 
             mergeFlash = 1.0;

@@ -98,6 +98,159 @@ window.App = window.App || {};
         if (Math.abs(e.touches[0].clientY - _lastTouchY) > 10) _touchCount++;
     }, { passive: true });
 
+    // --- Idle scroll hint: tiered escalation ---
+    let _lastScrollTime = 0;
+    let _hintGlow = 0;
+    const _breadcrumbs = [];
+    const HINT_TIER1_DELAY = 5;
+    const HINT_TIER2_DELAY = 10;
+    const HINT_TIER3_DELAY = 15;
+    const BREADCRUMB_CAP = 30;
+
+    function getHintTargetY() { return App.H * 0.88; }
+    // Reset idle timer on any scroll
+    window.addEventListener('scroll', function() {
+        _lastScrollTime = Date.now();
+        if (_hintGlow > 0) {
+            _hintGlow = 0;
+            hint.style.filter = '';
+            hint.style.textShadow = '';
+        }
+    }, { passive: true });
+
+    function updateIdleHint(progress, cx, cy, hintVisible) {
+        if (State.isComplete || _experienceStartTime === 0 || !hintVisible) return;
+
+        const W = App.W, H = App.H;
+        const idleSec = (Date.now() - Math.max(_experienceStartTime, _lastScrollTime)) / 1000;
+
+        // Tier 1 (5s): hint brightens
+        if (idleSec > HINT_TIER1_DELAY) {
+            const t1 = Math.min(1, (idleSec - HINT_TIER1_DELAY) / 3);
+            _hintGlow = t1;
+            hint.style.filter = `brightness(${1 + t1 * 0.8})`;
+        } else {
+            _hintGlow = 0;
+            hint.style.filter = '';
+        }
+
+        // Tier 2 (10s): warm glow aura
+        if (idleSec > HINT_TIER2_DELAY) {
+            const t2 = Math.min(1, (idleSec - HINT_TIER2_DELAY) / 3);
+            hint.style.textShadow = `0 0 ${8 + t2 * 12}px rgba(255, 200, 100, ${t2 * 0.6})`;
+        } else {
+            hint.style.textShadow = '';
+        }
+
+        // Arrow position (center-bottom of viewport, matching CSS .scroll-hint bottom:40px)
+        const arrowX = cx;
+        const arrowY = H - 40 * DPR;
+
+        // Tier 3 (15s): spawn scattered notes in bottom region
+        // Tier 3 (15s): spawn scattered notes in bottom region
+        // Urgency increases with idle time — faster and denser
+        const urgency = Math.min(1, (idleSec - HINT_TIER3_DELAY) / 20);
+        if (idleSec > HINT_TIER3_DELAY && _breadcrumbs.length < BREADCRUMB_CAP) {
+            const density = 0.1 + urgency * 0.2;
+            if (Math.random() < density) {
+                _breadcrumbs.push({
+                    x: (0.1 + Math.random() * 0.8) * W,
+                    y: (0.65 + Math.random() * 0.2) * H,
+                    vx: 0,
+                    vy: 0,
+                    life: 1.0,
+                    age: 0,
+                    size: C.PARTICLE_SIZE_MIN + Math.random() * (C.PARTICLE_SIZE_MAX - C.PARTICLE_SIZE_MIN),
+                    colorIdx: Math.floor(Math.random() * App.STRING_COLORS.length),
+                    noteIdx: Math.floor(Math.random() * App.NOTE_SYMBOLS.length),
+                    rotation: Math.floor(Math.random() * App.Particles.SPRITE_ROTATIONS.length),
+                    seed: Math.random() * 100,
+                });
+            }
+        }
+
+        // Physics + draw
+        const CELL = App.Particles.SPRITE_CELL;
+        const ROTS = App.Particles.SPRITE_ROTATIONS;
+        const SIZES = App.Particles.SPRITE_SIZES;
+
+        for (let i = _breadcrumbs.length - 1; i >= 0; i--) {
+            const b = _breadcrumbs[i];
+            b.age += 0.016;
+
+            // --- Forces (scale with urgency) ---
+            // 1. Gravity: pull toward arrow Y
+            const gravityPull = (0.02 + urgency * 0.04) * DPR;
+            b.vy += gravityPull;
+
+            // 2. Funnel: horizontal pull toward arrow X, stronger near arrow
+            const proximity = Math.max(0, 1 - Math.abs(arrowY - b.y) / (H * 0.4));
+            const funnelStrength = proximity * proximity * (0.04 + urgency * 0.06) * DPR;
+            const dx = arrowX - b.x;
+            b.vx += Math.sign(dx) * Math.min(Math.abs(dx) * 0.002, funnelStrength);
+
+            // Damping
+            b.vx *= 0.97;
+            b.vy *= 0.98;
+
+            // Ambient drift (before pull dominates)
+            b.x += b.vx + Math.sin(b.seed + b.age * 1.5) * 0.2 * DPR * (1 - proximity);
+            b.y += b.vy;
+
+            // Fade out below arrow
+            if (b.y > arrowY) {
+                b.life -= 0.04;
+            }
+
+            if (b.life <= 0 || b.y > H) {
+                _breadcrumbs.splice(i, 1);
+                continue;
+            }
+
+            // Draw as note sprite — matching main particle pipeline
+            const fadeIn = Math.min(1, b.age / 0.6);
+            const twinkle = 1.0 + 0.4 * Math.sin(b.seed * 3 + b.age * 4);
+            const baseAlpha = b.life * fadeIn * 0.65;
+            const drawAlpha = Math.min(1, baseAlpha * twinkle);
+            const size = b.size * DPR;
+            const noteSize = size * C.NOTE_DRAW_SCALE;
+            const drawSz = noteSize * 2;
+            if (drawSz < 2 || drawAlpha < 0.01) continue;
+
+            const row = App.Particles.getSpriteRow(noteSize);
+            const srcX = (b.noteIdx * ROTS.length + b.rotation) * CELL;
+            const srcY = (b.colorIdx * SIZES.length + row) * CELL;
+
+            ctx.globalAlpha = drawAlpha * 0.9;
+            ctx.drawImage(App.Particles.spriteSheet, srcX, srcY, CELL, CELL, b.x - drawSz / 2, b.y - drawSz / 2, drawSz, drawSz);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    // Scroll reaction for breadcrumbs
+    let _prevScroll = 0;
+    window.addEventListener('scroll', function() {
+        if (_breadcrumbs.length === 0) return;
+        const scrollDelta = currentScroll - _prevScroll;
+        _prevScroll = currentScroll;
+
+        if (scrollDelta > 0) {
+            // Scroll DOWN: job done — fade out gracefully
+            for (const b of _breadcrumbs) {
+                b.life -= 0.1;
+            }
+        } else if (scrollDelta < 0) {
+            // Scroll UP: scatter outward from arrow
+            const arrowX = App.W / 2;
+            for (const b of _breadcrumbs) {
+                const away = b.x - arrowX;
+                b.vx += Math.sign(away) * 3 * DPR;
+                b.vy -= 2 * DPR;
+                b.life -= 0.06;
+            }
+        }
+    }, { passive: true });
+
     // Audio + experience gated by start overlay tap
     const startOverlay = document.getElementById('startOverlay');
     let _experienceStartTime = 0;
@@ -156,10 +309,10 @@ window.App = window.App || {};
             }
         }
 
-        const count = 15 + Math.floor(Math.random() * 10);
+        const count = C.TAP_BURST_COUNT_MIN + Math.floor(Math.random() * C.TAP_BURST_COUNT_RANGE);
         for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
-            const speed = (1.5 + Math.random() * 3) * DPR;
+            const angle = (i / count) * Math.PI * 2 + Math.random() * C.TAP_BURST_ANGLE_JITTER;
+            const speed = (C.TAP_BURST_SPEED_MIN + Math.random() * C.TAP_BURST_SPEED_RANGE) * DPR;
             App.Particles.spawn(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed, App.randomColor());
         }
     });
@@ -347,8 +500,11 @@ window.App = window.App || {};
 
         const watermarkOpacity = State.isComplete ? Math.max(0, 1 - progress / 0.03) : 0;
         watermark.style.opacity = watermarkOpacity;
-        const hintOpacity = State.isComplete ? 0 : Math.max(0, 1 - smoothstep(C.STRINGS_FADE[0], C.STRINGS_FADE[1], progress));
+        const hintOpacity = State.isComplete ? 0 : Math.max(0, 1 - smoothstep(C.REVEAL[0] - 0.05, C.REVEAL[0], progress));
         hint.style.opacity = hintOpacity;
+
+        // Idle hint escalation (breadcrumbs rendered on canvas)
+        updateIdleHint(progress, W / 2, H * 0.5, hintOpacity > 0);
 
         App.Audio.update(progress);
 
@@ -362,6 +518,8 @@ window.App = window.App || {};
         const orbGrow = smoothstep(C.ORB_GROW[0], C.ORB_GROW[1], progress);
         const stringsFade = smoothstep(C.STRINGS_FADE[0], C.STRINGS_FADE[1], progress);
         const revealProgress = smoothstep(C.REVEAL[0], C.REVEAL[1], progress);
+
+        App.Audio.auroraBlend = orbGrow * orbGrow;
 
         // Orb properties
         const cx = W / 2;
@@ -475,9 +633,9 @@ window.App = window.App || {};
                 const dx = ptr.x - prev.x;
                 const dy = ptr.y - prev.y;
                 const speed = Math.sqrt(dx * dx + dy * dy);
-                if (speed > 2 * DPR && Math.random() < 0.6) {
+                if (speed > C.POINTER_TRAIL_SPEED_MIN * DPR && Math.random() < C.POINTER_TRAIL_CHANCE) {
                     const spread = (Math.random() - 0.5) * Math.PI * 0.6;
-                    const drift = 0.3 + Math.random() * 0.5;
+                    const drift = C.POINTER_TRAIL_DRIFT_MIN + Math.random() * C.POINTER_TRAIL_DRIFT_RANGE;
                     const trailVx = Math.cos(spread) * drift * DPR * (Math.random() - 0.5);
                     const trailVy = -drift * DPR * (0.5 + Math.random() * 0.5);
                     const color = App.randomColor();
@@ -610,8 +768,8 @@ window.App = window.App || {};
                 const cdx = cores[1].x - cores[0].x;
                 const cdy = cores[1].y - cores[0].y;
                 const coreDist = Math.sqrt(cdx * cdx + cdy * cdy);
-                const threshold = r * 0.3;
-                if (orbGrow > 0.1 && coreDist < threshold && coreDist > 0) {
+                const threshold = r * C.CORE_COLLISION_THRESHOLD_PCT;
+                if (orbGrow > C.CORE_COLLISION_ORB_GROW_MIN && coreDist < threshold && coreDist > 0) {
                     const proximity = 1 - coreDist / threshold;
                     const midX = (cores[0].x + cores[1].x) / 2;
                     const midY = (cores[0].y + cores[1].y) / 2;
@@ -626,13 +784,13 @@ window.App = window.App || {};
                     ctx.beginPath(); ctx.arc(midX, midY, flashR, 0, Math.PI * 2);
                     ctx.fillStyle = flashGrad; ctx.fill();
 
-                    if (Math.random() < proximity * 0.6) {
+                    if (Math.random() < proximity * C.CORE_COLLISION_EXPEL_CHANCE) {
                         const outAngle = Math.atan2(midY - cy, midX - cx);
-                        const burstCount = 1 + Math.floor(proximity * 3);
-                        const escapeBoost = 1 + orbPull * 3;
+                        const burstCount = C.CORE_COLLISION_BURST_MIN + Math.floor(proximity * C.CORE_COLLISION_BURST_RANGE);
+                        const escapeBoost = 1 + orbPull * C.CORE_COLLISION_ESCAPE_BOOST;
                         for (let b = 0; b < burstCount; b++) {
                             const angle = outAngle + (Math.random() - 0.5) * 1.2;
-                            const spd = (3 + Math.random() * 5) * DPR * escapeBoost;
+                            const spd = (C.CORE_COLLISION_SPEED_MIN + Math.random() * C.CORE_COLLISION_SPEED_RANGE) * DPR * escapeBoost;
                             App.Particles.spawn(midX, midY, Math.cos(angle) * spd, Math.sin(angle) * spd, App.randomColor());
                         }
                     }
@@ -680,7 +838,7 @@ window.App = window.App || {};
             const footerTargets = App.Footer.getTargets(fontSize, cx, H);
             const coreAlpha = Math.min(1, orbForm * 3);
             const coresActive = progress > 0.88;
-            App.DualCore.draw(ctx, cx, cy, orbMaxRadius, coreAlpha, time, 0, true, coresActive, footerTargets);
+            App.DualCore.draw(ctx, cx, cy, orbPulsedRadius, coreAlpha, time, 0, true, coresActive, footerTargets, orbMaxRadius);
 
             if (App.DualCore.areBothOrbiting()) {
                 const cores = App.DualCore.getCorePositions();
@@ -726,7 +884,7 @@ window.App = window.App || {};
                 State.enter(time, formationTime);
             }
             const _r = C.DEBUG ? [performance.now()] : null;
-            const textP = easeOutQuint(Math.min(1, revealProgress / 0.15));
+            const textP = easeOutQuint(Math.min(1, revealProgress / C.TEXT_FADE_PROGRESS));
             const photoDelay = formationTime + C.PHOTO_DELAY_AFTER_FORMATION;
             const photoP = revealElapsed > photoDelay ? easeOutQuint(Math.min(1, (revealElapsed - photoDelay) / C.PHOTO_FADE_DURATION)) : 0;
             const glowPulse = 0.85 + 0.15 * Math.sin(time * 1.5);
@@ -768,15 +926,17 @@ window.App = window.App || {};
                     drawGlowText(letters[i], lx, belowY + offsetY, textP);
                 }
 
-                const swarmPhase = Math.min(1, letterProgress / 0.6);
-                const materializePhase = Math.max(0, (letterProgress - 0.4) / 0.6);
+                const swarmPhase = Math.min(1, letterProgress / C.LETTER_SWARM_PHASE_END);
+                // Clamp denom so MATERIALIZE_PHASE_START=1 doesn't divide-by-zero.
+                const matDenom = Math.max(1e-6, 1 - C.LETTER_MATERIALIZE_PHASE_START);
+                const materializePhase = Math.max(0, (letterProgress - C.LETTER_MATERIALIZE_PHASE_START) / matDenom);
 
                 if (Math.random() < C.LETTER_SWARM_SPAWN_CHANCE && textP > 0.2 && App.Particles.aliveCount < C.LETTER_SWARM_ALIVE_CAP) {
                     const angle = Math.random() * Math.PI * 2;
                     const dist = fontSize * (C.LETTER_SPAWN_DIST_MIN + Math.random() * (C.LETTER_SPAWN_DIST_MAX - C.LETTER_SPAWN_DIST_MIN));
                     const sx = targetX + Math.cos(angle) * dist;
                     const sy = targetY + Math.sin(angle) * dist;
-                    const speed = 0.015 + swarmPhase * 0.02;
+                    const speed = C.LETTER_SWARM_SPEED_BASE + swarmPhase * C.LETTER_SWARM_SPEED_PHASE_GAIN;
                     App.Particles.spawn(sx, sy, (targetX - sx) * speed, (targetY - sy) * speed, App.randomColor());
                 }
 
@@ -787,13 +947,14 @@ window.App = window.App || {};
                     ctx.fillStyle = `rgba(255, 248, 230, ${mAlpha})`;
                     drawGlowText(letters[activeIndex], targetX, belowY + offsetY, mAlpha);
 
-                    if (materializePhase > 0.15 && activeIndex > State.lastBurstIndex) {
+                    if (materializePhase > C.LETTER_BURST_TRIGGER_PHASE && activeIndex > State.lastBurstIndex) {
                         State.lastBurstIndex = activeIndex;
                         App.dbg('LETTER: "' + letters[activeIndex] + '" materialized (' + activeIndex + '/' + (letters.length - 1) + ')');
-                        for (let sp = 0; sp < 30; sp++) {
-                            const a = (sp / 30) * Math.PI * 2 + Math.random() * 0.4;
-                            const spd = 3 + Math.random() * 5;
-                            sparkles.push({ x: targetX, y: belowY + offsetY, vx: Math.cos(a) * spd * DPR, vy: Math.sin(a) * spd * DPR, life: 1.0, size: (2.5 + Math.random() * 3) * DPR });
+                        const sparkN = C.LETTER_SPARKLE_COUNT;
+                        for (let sp = 0; sp < sparkN; sp++) {
+                            const a = (sp / sparkN) * Math.PI * 2 + Math.random() * C.LETTER_SPARKLE_ANGLE_JITTER;
+                            const spd = C.LETTER_SPARKLE_SPEED_MIN + Math.random() * C.LETTER_SPARKLE_SPEED_RANGE;
+                            sparkles.push({ x: targetX, y: belowY + offsetY, vx: Math.cos(a) * spd * DPR, vy: Math.sin(a) * spd * DPR, life: 1.0, size: (C.LETTER_SPARKLE_SIZE_MIN + Math.random() * C.LETTER_SPARKLE_SIZE_RANGE) * DPR });
                         }
                     }
                 }
@@ -895,7 +1056,7 @@ window.App = window.App || {};
                     }
                 }
                 ctx.globalAlpha = photoP * textP;
-                const photoRadius = orbMaxRadius * 0.92;
+                const photoRadius = orbMaxRadius * C.PHOTO_RADIUS_PCT;
                 if (C.DEBUG) {
                     const _pc0 = performance.now();
                     const photo = App.Cache.circularPhoto(babyImg, photoRadius);
@@ -915,7 +1076,7 @@ window.App = window.App || {};
                 const dateSize = fontSize * C.FONT_BODY;
                 const dateY = belowY + fontSize * C.DATE_OFFSET_Y;
                 const coreProgress = App.DualCore.getFlightProgress();
-                const dateP = easeOutQuint(Math.min(1, Math.max(0, (coreProgress - 0.25) / 0.3)));
+                const dateP = easeOutQuint(Math.min(1, Math.max(0, (coreProgress - C.DATE_FADE_START) / C.DATE_FADE_DURATION)));
                 if (dateP > 0) {
                     ctx.font = `300 ${dateSize}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
                     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';

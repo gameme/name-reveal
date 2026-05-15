@@ -33,7 +33,7 @@ App.Supernova = {
         let target;
         if (this.compression > 0) {
             const curved = this.compression * this.compression * this.compression;
-            target = 1 - curved * 0.95;
+            target = 1 - curved * App.Config.COMPRESSION_COLLAPSE_FACTOR;
         } else if (this.flash > 0) {
             target = 1 + this.flash * 0.4;
         } else if (this._smoothOrbScale < 0.15) {
@@ -51,11 +51,13 @@ App.Supernova = {
     },
 
     spawnVortex(cx, cy, orbMaxRadius) {
-        if (this.compression <= 0.3) return;
+        const C = App.Config;
+        if (this.compression <= C.VORTEX_THRESHOLD) return;
         const DPR = App.DPR;
         const curved = this.compression * this.compression * this.compression;
-        // Last 25%: particle pull accelerates dramatically
-        const finalRush = Math.max(0, (this.compression - 0.75) / 0.25);
+        // Last quarter: particle pull accelerates dramatically. Clamp denom so threshold=1 doesn't divide-by-zero.
+        const rushDenom = Math.max(1e-6, 1 - C.VORTEX_FINAL_RUSH_THRESHOLD);
+        const finalRush = Math.max(0, (this.compression - C.VORTEX_FINAL_RUSH_THRESHOLD) / rushDenom);
         const spawnRate = Math.floor(curved * 5 + finalRush * finalRush * 10);
         for (let i = 0; i < spawnRate; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -69,60 +71,67 @@ App.Supernova = {
     },
 
     trigger(cx, cy, orbMaxRadius, sparkles) {
+        const C = App.Config;
         const DPR = App.DPR;
         this.flash = 1.0;
         this.ring = 1.0;
         this.rayBurst = 1.0;
         this.ringRadius = orbMaxRadius;
-        this.screenShake = 1.5;
+        this.screenShake = C.SHAKE_INITIAL;
 
         // Clear vortex particles to free the pool — they're invisible post-flash anyway
         App.Particles.clearAll();
 
-        const burstCount = 450 + Math.floor(Math.random() * 100);
+        const burstCount = C.BURST_PARTICLE_COUNT_MIN + Math.floor(Math.random() * C.BURST_PARTICLE_COUNT_RANGE);
         for (let sp = 0; sp < burstCount; sp++) {
             const a = (sp / burstCount) * Math.PI * 2 + Math.random() * 0.5;
-            const spd = (3 + Math.random() * 14) * DPR;
+            const spd = (C.BURST_PARTICLE_SPEED_MIN + Math.random() * C.BURST_PARTICLE_SPEED_RANGE) * DPR;
             const color = App.randomColor();
             App.Particles.spawn(
-                cx + Math.cos(a) * orbMaxRadius * (0.8 + Math.random() * 0.5),
-                cy + Math.sin(a) * orbMaxRadius * (0.8 + Math.random() * 0.5),
+                cx + Math.cos(a) * orbMaxRadius * (C.BURST_PARTICLE_DIST_BASE + Math.random() * C.BURST_PARTICLE_DIST_RANGE),
+                cy + Math.sin(a) * orbMaxRadius * (C.BURST_PARTICLE_DIST_BASE + Math.random() * C.BURST_PARTICLE_DIST_RANGE),
                 Math.cos(a) * spd, Math.sin(a) * spd, color
             );
         }
 
-        for (let sp = 0; sp < 60; sp++) {
-            const a = (sp / 60) * Math.PI * 2 + Math.random() * 0.2;
-            const spd = 4 + Math.random() * 6;
+        const sparkCount = C.BURST_SPARKLE_COUNT;
+        for (let sp = 0; sp < sparkCount; sp++) {
+            const a = (sp / sparkCount) * Math.PI * 2 + Math.random() * 0.2;
+            const spd = C.BURST_SPARKLE_SPEED_MIN + Math.random() * C.BURST_SPARKLE_SPEED_RANGE;
             sparkles.push({
                 x: cx + Math.cos(a) * orbMaxRadius,
                 y: cy + Math.sin(a) * orbMaxRadius,
                 vx: Math.cos(a) * spd * DPR,
                 vy: Math.sin(a) * spd * DPR,
                 life: 1.0,
-                size: (3 + Math.random() * 4) * DPR
+                size: (C.BURST_SPARKLE_SIZE_MIN + Math.random() * C.BURST_SPARKLE_SIZE_RANGE) * DPR
             });
         }
     },
 
     applyShake(ctx) {
         if (this.screenShake > 0.01) {
+            const C = App.Config;
             const DPR = App.DPR;
-            const shakeX = (Math.random() - 0.5) * this.screenShake * 20 * DPR;
-            const shakeY = (Math.random() - 0.5) * this.screenShake * 20 * DPR;
+            const shakeX = (Math.random() - 0.5) * this.screenShake * C.SHAKE_MAGNITUDE_PX * DPR;
+            const shakeY = (Math.random() - 0.5) * this.screenShake * C.SHAKE_MAGNITUDE_PX * DPR;
             ctx.translate(shakeX, shakeY);
-            this.screenShake *= 0.9;
+            this.screenShake *= C.SHAKE_DECAY;
         } else {
             this.screenShake = 0;
         }
     },
 
     renderRipples(ctx, cx, cy, orbRadius, time) {
-        if (this.compression < 0.5) return;
+        const C = App.Config;
+        if (this.compression < C.RIPPLE_THRESHOLD) return;
         const DPR = App.DPR;
 
-        // Spawn ripples at increasing frequency as compression approaches 1
-        const intensity = (this.compression - 0.5) * 2;
+        // Spawn ripples at increasing frequency as compression approaches 1.
+        // Clamp denom so threshold=1 doesn't produce NaN (which would never expire from _ripples).
+        const denom = Math.max(1e-6, 1 - C.RIPPLE_THRESHOLD);
+        const intensity = (this.compression - C.RIPPLE_THRESHOLD) / denom;
+        if (!isFinite(intensity)) return;
         const interval = 0.8 - intensity * 0.6;
         if (time - this._lastRippleTime > interval) {
             this._ripples.push({ radius: orbRadius * this.getOrbScale() * 1.2, alpha: intensity * 0.4 });
@@ -133,7 +142,7 @@ App.Supernova = {
         for (let i = this._ripples.length - 1; i >= 0; i--) {
             const r = this._ripples[i];
             r.radius += DPR * (2 + intensity * 4);
-            r.alpha *= 0.96;
+            r.alpha *= C.RIPPLE_DECAY;
             if (r.alpha < 0.01) { this._ripples.splice(i, 1); continue; }
             ctx.beginPath();
             ctx.arc(cx, cy, r.radius, 0, Math.PI * 2);
@@ -144,16 +153,17 @@ App.Supernova = {
     },
 
     renderEffects(ctx, cx, cy, W, H) {
+        const C = App.Config;
         const DPR = App.DPR;
         if (this.flash > 0) {
-            this.flash *= 0.945;
+            this.flash *= C.BURST_FLASH_DECAY;
             if (this.flash < 0.01) this.flash = 0;
             ctx.fillStyle = `rgba(255, 250, 230, ${this.flash * 0.6})`;
             ctx.fillRect(0, 0, W, H);
         }
         if (this.ring > 0) {
-            this.ring *= 0.96;
-            this.ringRadius += 12 * DPR;
+            this.ring *= C.BURST_RING_DECAY;
+            this.ringRadius += C.BURST_RING_GROWTH_PX * DPR;
             if (this.ring < 0.01) this.ring = 0;
             ctx.beginPath();
             ctx.arc(cx, cy, this.ringRadius, 0, Math.PI * 2);
@@ -166,7 +176,7 @@ App.Supernova = {
     // Three-act god rays: compress → burst → fade to zero
     updateRays() {
         if (this.rayBurst > 0) {
-            this.rayBurst *= 0.94;
+            this.rayBurst *= App.Config.RAY_BURST_DECAY;
             if (this.rayBurst < 0.01) {
                 this.rayBurst = 0;
             }
@@ -182,10 +192,10 @@ App.Supernova = {
         // During compression: collapse to near-zero
         if (this.compression > 0) {
             const curved = this.compression * this.compression * this.compression;
-            return Math.max(0.05, 1 - curved * 0.95);
+            return Math.max(0.05, 1 - curved * App.Config.COMPRESSION_COLLAPSE_FACTOR);
         }
         // During burst: expand outward
-        if (this.rayBurst > 0) return 1 + this.rayBurst * 2.5;
+        if (this.rayBurst > 0) return 1 + this.rayBurst * App.Config.RAY_BURST_SCALE;
         return 1;
     },
 
