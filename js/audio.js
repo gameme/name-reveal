@@ -638,7 +638,7 @@ App.Audio = {
         this.melodyAudio.currentTime = 0;
         const t = this.audioCtx.currentTime;
         this.melodyGain.gain.setValueAtTime(0, t);
-        this.melodyGain.gain.linearRampToValueAtTime(0.6, t + 2.0);
+        this.melodyGain.gain.linearRampToValueAtTime(0.35, t + 2.0);
         this.phase = AUDIO_PHASE.MELODY;
     },
 
@@ -656,11 +656,13 @@ App.Audio = {
         this.droneGain.gain.setTargetAtTime(droneVol, t, 0.3);
         const filterFreq = C.DRONE_FILTER_MIN + progress * (C.DRONE_FILTER_MAX - C.DRONE_FILTER_MIN);
         this.droneFilter.frequency.setTargetAtTime(filterFreq, t, 0.3);
-        const melodyVol = melodyActive ? Math.max(0, Math.min(0.8, (progress - C.MELODY_FADE_START) / (C.MELODY_FADE_END - C.MELODY_FADE_START))) : 0;
+        const melodyVol = melodyActive ? Math.max(0, Math.min(0.5, (progress - C.MELODY_FADE_START) / (C.MELODY_FADE_END - C.MELODY_FADE_START))) : 0;
         this.melodyGain.gain.setTargetAtTime(melodyVol, t, 0.5);
     },
 
     _lastChimeTime: 0,
+    _collisionNoteIndex: 0,
+    _collisionDirection: 1,
 
     playCollisionChime(proximity) {
         if (this.phase === AUDIO_PHASE.UNINITIALIZED || this.muted) return;
@@ -670,35 +672,55 @@ App.Audio = {
         this._lastChimeTime = now;
 
         const t = now;
-        const baseFreq = 600 + proximity * 400;
-        const vol = 0.04 + proximity * 0.06;
+        const idx = this._collisionNoteIndex;
+        const freq = this.SWARA_BASE * this.SWARA_RATIOS[idx];
+        const vol = 0.05 + proximity * 0.04;
+        const decay = 2.5 + (1 - proximity) * 1.5;
 
+        // Root + detuned pair (shimmer)
         const osc1 = ctx.createOscillator();
         osc1.type = 'sine';
-        osc1.frequency.value = baseFreq;
+        osc1.frequency.value = freq;
 
         const osc2 = ctx.createOscillator();
         osc2.type = 'sine';
-        osc2.frequency.value = baseFreq * 1.5;
+        osc2.frequency.value = freq * 1.003;
 
+        // Octave above (airy)
+        const osc3 = ctx.createOscillator();
+        osc3.type = 'sine';
+        osc3.frequency.value = freq * 2.002;
+
+        // Long wash envelope
         const gain = ctx.createGain();
         gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(vol, t + 0.01);
-        gain.gain.exponentialRampToValueAtTime(vol * 0.3, t + 0.15);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+        gain.gain.linearRampToValueAtTime(vol, t + 0.04);
+        gain.gain.setValueAtTime(vol, t + 0.2);
+        gain.gain.exponentialRampToValueAtTime(vol * 0.3, t + decay * 0.5);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + decay);
 
-        const g2 = ctx.createGain();
-        g2.gain.value = 0.3;
+        const g2 = ctx.createGain(); g2.gain.value = 0.6;
+        const g3 = ctx.createGain(); g3.gain.value = 0.25;
 
         osc1.connect(gain);
-        osc2.connect(g2);
-        g2.connect(gain);
+        osc2.connect(g2); g2.connect(gain);
+        osc3.connect(g3); g3.connect(gain);
         gain.connect(this.masterGain);
 
-        osc1.start(t);
-        osc2.start(t);
-        osc1.stop(t + 0.65);
-        osc2.stop(t + 0.65);
+        osc1.start(t); osc2.start(t); osc3.start(t);
+        osc1.stop(t + decay + 0.1);
+        osc2.stop(t + decay + 0.1);
+        osc3.stop(t + decay + 0.1);
+
+        // Advance through ascending/descending scale cycle
+        this._collisionNoteIndex += this._collisionDirection;
+        if (this._collisionNoteIndex >= 7) {
+            this._collisionNoteIndex = 7;
+            this._collisionDirection = -1;
+        } else if (this._collisionNoteIndex <= 0) {
+            this._collisionNoteIndex = 0;
+            this._collisionDirection = 1;
+        }
     },
 
     toggleMute() {

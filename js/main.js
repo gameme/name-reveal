@@ -519,7 +519,7 @@ window.App = window.App || {};
         const stringsFade = smoothstep(C.STRINGS_FADE[0], C.STRINGS_FADE[1], progress);
         const revealProgress = smoothstep(C.REVEAL[0], C.REVEAL[1], progress);
 
-        App.Audio.auroraBlend = orbGrow * orbGrow;
+        App.Audio.auroraBlend = orbGrow;
 
         // Orb properties
         const cx = W / 2;
@@ -763,7 +763,7 @@ window.App = window.App || {};
             if (!State.photoBurst) {
                 App.DualCore.draw(ctx, cx, cy, r, orbAlpha, time, App.Supernova.compression, false, 0, null);
 
-                // Core collision — expel particles when the two cores pass near each other
+                // Core collision — flash only (energy contained, building)
                 const cores = App.DualCore.getCorePositions();
                 const cdx = cores[1].x - cores[0].x;
                 const cdy = cores[1].y - cores[0].y;
@@ -774,7 +774,6 @@ window.App = window.App || {};
                     const midX = (cores[0].x + cores[1].x) / 2;
                     const midY = (cores[0].y + cores[1].y) / 2;
 
-                    // Collision flash — always visible when cores are near
                     const flashR = r * 0.4 * proximity;
                     const flashGrad = ctx.createRadialGradient(midX, midY, 0, midX, midY, flashR);
                     flashGrad.addColorStop(0, `rgba(255, 255, 240, ${proximity * proximity * 0.9})`);
@@ -783,17 +782,6 @@ window.App = window.App || {};
                     flashGrad.addColorStop(1, 'rgba(255, 180, 100, 0)');
                     ctx.beginPath(); ctx.arc(midX, midY, flashR, 0, Math.PI * 2);
                     ctx.fillStyle = flashGrad; ctx.fill();
-
-                    if (Math.random() < proximity * C.CORE_COLLISION_EXPEL_CHANCE) {
-                        const outAngle = Math.atan2(midY - cy, midX - cx);
-                        const burstCount = C.CORE_COLLISION_BURST_MIN + Math.floor(proximity * C.CORE_COLLISION_BURST_RANGE);
-                        const escapeBoost = 1 + orbPull * C.CORE_COLLISION_ESCAPE_BOOST;
-                        for (let b = 0; b < burstCount; b++) {
-                            const angle = outAngle + (Math.random() - 0.5) * 1.2;
-                            const spd = (C.CORE_COLLISION_SPEED_MIN + Math.random() * C.CORE_COLLISION_SPEED_RANGE) * DPR * escapeBoost;
-                            App.Particles.spawn(midX, midY, Math.cos(angle) * spd, Math.sin(angle) * spd, App.randomColor());
-                        }
-                    }
                 }
             }
 
@@ -851,15 +839,7 @@ window.App = window.App || {};
                     const midX = (cores[0].x + cores[1].x) / 2;
                     const midY = (cores[0].y + cores[1].y) / 2;
 
-                    const flashR = orbPulsedRadius * 0.35 * proximity;
-                    const flashGrad = ctx.createRadialGradient(midX, midY, 0, midX, midY, flashR);
-                    flashGrad.addColorStop(0, `rgba(255, 255, 240, ${proximity * proximity * 0.8})`);
-                    flashGrad.addColorStop(0.3, `rgba(255, 230, 180, ${proximity * 0.4})`);
-                    flashGrad.addColorStop(0.7, `rgba(255, 200, 120, ${proximity * 0.12})`);
-                    flashGrad.addColorStop(1, 'rgba(255, 180, 100, 0)');
-                    ctx.beginPath(); ctx.arc(midX, midY, flashR, 0, Math.PI * 2);
-                    ctx.fillStyle = flashGrad; ctx.fill();
-
+                    // Particles only — quiet generativity, no flash
                     if (Math.random() < proximity * 0.5) {
                         const outAngle = Math.atan2(midY - cy, midX - cx);
                         const burstCount = 1 + Math.floor(proximity * 4);

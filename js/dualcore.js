@@ -31,6 +31,7 @@ App.DualCore = (function() {
             _orbitPhaseOffset: 0,
             _descentStart: 0, _descentFromX: 0, _descentFromY: 0,
             _settledTime: 0,
+            _earlyKindle: 0,
         };
     }
 
@@ -181,9 +182,28 @@ App.DualCore = (function() {
         core.startY = fromY;
         core.startTime = time;
         core.flightDuration = Math.max(0.5, duration);
-        const cp = computeSafeControlPoint(fromX, fromY, targetX, targetY, cx, cy, orbRadius);
-        core.cpX = cp.x;
-        core.cpY = cp.y;
+
+        // Momentum-aware control point: bias toward orbital tangent if departing from orbit
+        const angleFromCenter = Math.atan2(fromY - cy, fromX - cx);
+        const distFromCenter = Math.sqrt((fromX - cx) * (fromX - cx) + (fromY - cy) * (fromY - cy));
+        const isNearOrbit = Math.abs(distFromCenter - orbRadius * OUTER_ORBIT) < orbRadius * 0.5;
+
+        if (isNearOrbit) {
+            const tangentX = -Math.sin(angleFromCenter);
+            const tangentY = Math.cos(angleFromCenter);
+            const sweepDist = orbRadius * 1.8;
+            const midX = (fromX + targetX) / 2;
+            const midY = (fromY + targetY) / 2;
+            core.cpX = (fromX + tangentX * sweepDist) * 0.5 + midX * 0.5;
+            core.cpY = (fromY + tangentY * sweepDist) * 0.5 + midY * 0.5;
+            const margin = orbRadius * 0.5;
+            core.cpX = Math.max(margin, Math.min(App.W - margin, core.cpX));
+            core.cpY = Math.max(margin, Math.min(App.H - margin, core.cpY));
+        } else {
+            const cp = computeSafeControlPoint(fromX, fromY, targetX, targetY, cx, cy, orbRadius);
+            core.cpX = cp.x;
+            core.cpY = cp.y;
+        }
     }
 
     function initCoreFlight(core, cx, cy, orbRadius, expelAngle, time, duration, targetX, targetY) {
@@ -254,19 +274,20 @@ App.DualCore = (function() {
         }
 
         // --- Post-burst setup (once) ---
+        // Use expelR (orbMaxRadius) not orbRadius — orbRadius may be compressed at burst moment
         if (coreA.state === STATE.ORBITING_INSIDE && footerTargets) {
             if (App.Footer.isPrimaryDone()) { coreA.state = STATE.DONE; }
             else {
                 const T = App.Footer.TIMING;
                 const photoFade = App.Config.PHOTO_FADE_DURATION;
-                initCoreFlight(coreA, cx, cy, expelR, EXPEL_ANGLE_A, time, photoFade + T.primaryDelay + T.primaryFadeDuration * 0.6, footerTargets.shruti.x, footerTargets.shruti.y);
+                initCoreFlight(coreA, cx, cy, expelR, EXPEL_ANGLE_A, time, photoFade + T.primaryDelay + T.primaryFadeDuration * 0.6, footerTargets.shrutiDot.x, footerTargets.shrutiDot.y);
             }
 
             if (App.Footer.isSecondaryStarted()) { coreB.state = STATE.DONE; }
             else {
                 const T = App.Footer.TIMING;
                 const photoFade = App.Config.PHOTO_FADE_DURATION;
-                initCoreFlight(coreB, cx, cy, expelR, EXPEL_ANGLE_B, time, photoFade + T.primaryDelay + T.shiftDelay + T.revealDuration * 0.6, footerTargets.vinod.x, footerTargets.vinod.y);
+                initCoreFlight(coreB, cx, cy, expelR, EXPEL_ANGLE_B, time, photoFade + T.primaryDelay + T.primaryFadeDuration * 0.6, footerTargets.vinodDot.x, footerTargets.vinodDot.y);
             }
 
             mergeFlash = 1.0;
@@ -288,7 +309,7 @@ App.DualCore = (function() {
         const photoFade = App.Config.PHOTO_FADE_DURATION;
 
         renderCore(ctx, coreA, cx, cy, orbRadius, coreR, time, revealActive, footerTargets.shruti, footerTargets.shrutiDot,
-            App.Footer.isPrimaryDone(), ORBIT_SPEED_A, 0,
+            App.Footer.isPrimaryStarting(), ORBIT_SPEED_A, 0,
             '255, 220, 140', '255, 180, 80', '255, 200, 120',
             photoFade + T.primaryDelay + T.primaryFadeDuration * 0.6, orbAlpha);
 
@@ -308,33 +329,33 @@ App.DualCore = (function() {
         const lastX = core._renderedX || cx;
         const lastY = core._renderedY || cy;
 
-        // Trigger descent only from FLYING — orbiting cores wait until the user scrolls back down
+        // Trigger descent only from FLYING after flight is mostly complete
         if (isDone && core.state === STATE.FLYING) {
-            core._descentStart = time;
-            core._descentFromX = lastX;
-            core._descentFromY = lastY;
-            core.state = STATE.DESCENDING;
-        }
-
-        // FLYING → ORBITING_OUTSIDE (reveal lost)
-        if (core.state === STATE.FLYING && !revealActive) {
-            core.transitionX = lastX;
-            core.transitionY = lastY;
-            core.transitionP = 0;
-            core._orbitPhaseOffset = Math.atan2(lastY - cy, lastX - cx) - time * orbitSpeed * 0.5;
-            core.state = STATE.ORBITING_OUTSIDE;
-        }
-
-        // ORBITING_OUTSIDE → FLYING or direct descent (reveal resumed)
-        if (core.state === STATE.ORBITING_OUTSIDE && revealActive) {
-            if (isDone) {
+            const flightP = Math.min(1, (time - core.startTime) / core.flightDuration);
+            if (flightP > 0.9) {
                 core._descentStart = time;
                 core._descentFromX = lastX;
                 core._descentFromY = lastY;
                 core.state = STATE.DESCENDING;
-            } else {
-                launchFlight(core, lastX, lastY, target.x, target.y, cx, cy, orbRadius, time, totalFlightTime);
             }
+        }
+
+        // FLYING → ORBITING_OUTSIDE (reveal lost — enter orbit matching flight direction)
+        if (core.state === STATE.FLYING && !revealActive) {
+            const flightElapsed = time - core.startTime;
+            if (flightElapsed > 1.0) {
+                core.transitionX = lastX;
+                core.transitionY = lastY;
+                core.transitionP = 0;
+                core._orbitPhaseOffset = Math.atan2(lastY - cy, lastX - cx) - time * orbitSpeed * 0.5;
+                core.state = STATE.ORBITING_OUTSIDE;
+            }
+        }
+
+        // ORBITING_OUTSIDE → FLYING (reveal resumed)
+        if (core.state === STATE.ORBITING_OUTSIDE && revealActive) {
+            const flightDur = isDone ? 2.5 : totalFlightTime;
+            launchFlight(core, lastX, lastY, dotTarget.x, dotTarget.y, cx, cy, orbRadius, time, flightDur);
         }
 
         // --- Compute position ---
@@ -344,37 +365,40 @@ App.DualCore = (function() {
             const dx = dotTarget.x - core._descentFromX;
             const dy = dotTarget.y - core._descentFromY;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            const descentDuration = Math.min(3.5, Math.max(1.0, dist / (orbRadius * 0.7)));
+            const descentDuration = Math.max(0.6, Math.min(3.5, dist / (orbRadius * 0.7)));
             const elapsed = time - core._descentStart;
             const p = Math.min(1, elapsed / descentDuration);
             const eased = easeOut(p);
             x = core._descentFromX + dx * eased;
             y = core._descentFromY + dy * eased;
-            // Shrink to dot size
             coreR = coreR * (1 - eased * (1 - SETTLED_DOT_SCALE));
             alpha = 1 - eased * 0.3;
             if (p >= 1) {
                 core.state = STATE.SETTLED;
                 core._settledTime = time;
             }
+            // Start flame early in last 30% of descent
+            if (p > 0.7) {
+                core._earlyKindle = (p - 0.7) / 0.3;
+            }
         } else if (core.state === STATE.SETTLED) {
             x = dotTarget.x;
             y = dotTarget.y;
             coreR = coreR * SETTLED_DOT_SCALE;
-            const kindle = Math.min(1, (time - core._settledTime) / 1.5);
+            const kindle = Math.min(1, (core._earlyKindle || 0) * 0.3 + (time - core._settledTime) / 3.0);
             alpha = (0.6 + kindle * 0.15) + 0.15 * Math.sin(time * 2.5) * kindle;
         } else if (core.state === STATE.FLYING) {
             const elapsed = time - core.startTime;
             const progress = Math.min(1, elapsed / core.flightDuration);
             const eased = easeOut(progress);
-            x = bezierVal(eased, core.startX, core.cpX, target.x);
-            y = bezierVal(eased, core.startY, core.cpY, target.y);
+            x = bezierVal(eased, core.startX, core.cpX, dotTarget.x);
+            y = bezierVal(eased, core.startY, core.cpY, dotTarget.y);
 
             // Dim over last 20% of flight (arriving gently)
             alpha = progress > 0.8 ? 1 - (progress - 0.8) / 0.2 * 0.4 : 1;
 
-            const getX = (t) => bezierVal(t, core.startX, core.cpX, target.x);
-            const getY = (t) => bezierVal(t, core.startY, core.cpY, target.y);
+            const getX = (t) => bezierVal(t, core.startX, core.cpX, dotTarget.x);
+            const getY = (t) => bezierVal(t, core.startY, core.cpY, dotTarget.y);
             drawTrail(ctx, getX, getY, eased, coreR, alpha, trailColor);
 
         } else if (core.state === STATE.ORBITING_OUTSIDE) {
@@ -400,8 +424,10 @@ App.DualCore = (function() {
             const finalAlpha = alpha * parentAlpha;
             if (finalAlpha > 0) {
                 if (core.state === STATE.SETTLED) {
-                    const kindle = Math.min(1, (time - core._settledTime) / 1.5);
+                    const kindle = Math.min(1, (core._earlyKindle || 0) * 0.3 + (time - core._settledTime) / 3.0);
                     drawFlame(ctx, x, y, coreR, colorInner, colorMid, finalAlpha, time, phaseOff, kindle);
+                } else if (core.state === STATE.DESCENDING && core._earlyKindle > 0) {
+                    drawFlame(ctx, x, y, coreR, colorInner, colorMid, finalAlpha, time, phaseOff, core._earlyKindle * 0.15);
                 } else {
                     drawCoreGlow(ctx, x, y, coreR, colorInner, colorMid, finalAlpha);
                 }

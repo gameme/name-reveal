@@ -36,9 +36,10 @@ App.Supernova = {
             target = 1 - curved * App.Config.COMPRESSION_COLLAPSE_FACTOR;
         } else if (this.flash > 0) {
             target = 1 + this.flash * 0.4;
-        } else if (this._smoothOrbScale < 0.15) {
-            target = this._smoothOrbScale;
         } else {
+            // Compression and flash both zero — return to full size. Lerp handles the smoothing
+            // so a reveal that gets interrupted mid-compression and re-entered finds the orb back
+            // at full scale, instead of stuck at the collapsed radius.
             target = 1;
         }
         const prev = this._smoothOrbScale;

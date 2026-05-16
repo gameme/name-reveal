@@ -12,7 +12,7 @@ App.Footer = (function() {
     const TIMING = {
         primaryDelay: 3.0,
         primaryFadeDuration: 1.5,
-        shiftDelay: 2,
+        shiftDelay: 4.5,
         shiftDuration: 1.5,
         revealDuration: 2.0,
         envelopeDuration: 0.8,
@@ -57,21 +57,19 @@ App.Footer = (function() {
             }
             case STATE.REVEALING_PRIMARY: {
                 const primaryP = App.easeOutQuint(Math.min(1, stateTimer / TIMING.primaryFadeDuration));
+                const shrutiP = primaryP > 0.7 ? Math.min(1, (primaryP - 0.7) / 0.3) : 0;
                 if (primaryP >= 1) {
                     advance(STATE.PRIMARY_VISIBLE);
                     return computeProgress();
                 }
-                return { primaryP, shiftP: 0, revealP: 0, shrutiP: 0, vinodP: 0, settled: false };
+                return { primaryP, shiftP: 0, revealP: 0, shrutiP, vinodP: 0, settled: false };
             }
             case STATE.PRIMARY_VISIBLE: {
                 if (stateTimer > TIMING.shiftDelay) {
                     advance(STATE.SHIFTING);
                     return computeProgress();
                 }
-                const DESCENT = 0.4;
-                const EMANATION = 1.0;
-                const shrutiP = Math.min(1, Math.max(0, (stateTimer - DESCENT) / EMANATION));
-                return { primaryP: 1, shiftP: 0, revealP: 0, shrutiP, vinodP: 0, settled: false };
+                return { primaryP: 1, shiftP: 0, revealP: 0, shrutiP: 1, vinodP: 0, settled: false };
             }
             case STATE.SHIFTING: {
                 const shiftP = App.easeOutQuint(Math.min(1, stateTimer / TIMING.shiftDuration));
@@ -315,9 +313,10 @@ App.Footer = (function() {
         };
     }
 
+    function isPrimaryStarting() { return state >= STATE.REVEALING_PRIMARY && stateTimer > TIMING.primaryFadeDuration * 0.5; }
     function isPrimaryDone() { return state >= STATE.PRIMARY_VISIBLE; }
     function isSecondaryStarted() { return state >= STATE.SHIFTING; }
     function isComplete() { return state >= STATE.COMPLETE; }
 
-    return { draw, markInactive, getTargets, isPrimaryDone, isSecondaryStarted, isComplete, TIMING };
+    return { draw, markInactive, getTargets, isPrimaryStarting, isPrimaryDone, isSecondaryStarted, isComplete, TIMING };
 })();

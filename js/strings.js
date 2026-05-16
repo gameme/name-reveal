@@ -126,7 +126,7 @@ App.Strings = {
         const color = App.STRING_COLORS[s];
 
         // Aurora evolution: as orb grows, waves slow down and glow widens
-        const auroraBlend = orbGrow * orbGrow;
+        const auroraBlend = orbGrow;
         const effectiveFreq = freq * (1 - auroraBlend * (1 - C.STRING_AURORA_FREQ_MULT));
 
         const path = new Path2D();
