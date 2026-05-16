@@ -1,6 +1,6 @@
-# Cosmic Resonance (raaga-reveal)
+# Cosmic Resonance (name-reveal)
 
-A scroll-driven HTML5 canvas experience that reveals a baby's name (Raaga, also rendered in Kannada and Devanagari) and photo. The technical shape: four vibrating strings birth an orb that compresses, supernova-bursts to reveal the name and photo, then two binary cores fly out to perch as candle flames over the dots of "Shruti" and "Vinod" in the credits.
+A scroll-driven HTML5 canvas experience that reveals a baby's name (Name, also rendered in Kannada and Devanagari) and photo. The technical shape: four vibrating strings birth an orb that compresses, supernova-bursts to reveal the name and photo, then two binary cores fly out to perch as candle flames over the dots of "Shruti" and "Vinod" in the credits.
 
 ## Architecture
 
@@ -19,7 +19,7 @@ Loading order (top-to-bottom in `index.html` script block), with what each modul
 | `js/browser.js` | iOS pinch-zoom, gesture-zoom, and multi-touch zoom suppression. Pure side-effect, no exports. |
 | `js/errors.js` | `App.dbg/dbgw/dbge` (no-op until `Config.DEBUG`), `_errorLog` ring buffer (cap 100), 3s POST-beacon to `/log`, error overlay + `window.onerror` capture. |
 | `js/config.js` | `App.Config` — every tunable knob. **Read this file for any numeric constant**, do not hardcode. |
-| `js/shared.js` | Color palette, easing fns (`easeOutQuint`, `smoothstep`), `App.NAME_LETTERS` (`['R','a','a','g','a']`), `App.DPR` (clamped to 2), LAN URL fetch from `/ip`. |
+| `js/shared.js` | Color palette, easing fns (`easeOutQuint`, `smoothstep`), `App.NAME_LETTERS` (`['G','r','a','h','i', 't']`), `App.DPR` (clamped to 2), LAN URL fetch from `/ip`. |
 | `js/cache.js` | `Cache.circularPhoto` (resize-invalidated photo canvas) and `Cache.text` (heart-emoji bitmap). |
 | `js/input.js` | Multi-touch `pointers` Map; mouse fallback suppressed once any touch fires (prevents ghost pointers); 35px iOS edge-swipe-back guard. |
 | `js/strings.js` | Pluck/strum interaction, glow rendering, profile bar HUD. Produces strum energy + particle bursts. |
@@ -223,7 +223,7 @@ These are NOT enforced by structure — breaking them silently breaks the experi
 
 ## Identity / strings
 
-- Reveal letters: `App.NAME_LETTERS = ['R','a','a','g','a']` in `shared.js`.
+- Reveal letters: `App.NAME_LETTERS = ['G','r','a','h','i', 't']` in `shared.js`.
 - Cycle scripts (in `Config.CYCLE_FONTS`): Latin (Nistha, SF Pro), Kannada `ರಾಗಾ` (AnekKannada), Devanagari `रागा` (Akasha).
 - Birth date string: `Config.BIRTH_DATE` (free-form display string in config).
 - Footer text (in `footer.js`'s `SEGMENTS` constant): "Made with ❣️ in California by Shruti & Vinod".

@@ -208,10 +208,10 @@ App.Config = {
     FONT_SCALE_OUT_MAX:       1.3, // outgoing font scales up to this before fading
 
     CYCLE_FONTS: [
-        { weight: '', family: 'Nistha, Georgia, serif', text: 'Raaga', scale: 1.0, y: 0 },
-        { weight: '300 ', family: '-apple-system, "SF Pro Display", "Helvetica Neue", sans-serif', text: 'Raaga', scale: 0.9, y: -15 },
-        { weight: '', family: 'AnekKannada, serif', text: 'ರಾಗಾ', scale: 0.85, y: 10 },
-        { weight: '', family: 'Akasha, serif', text: 'रागा', scale: 1.25, y: 0 },
+        { weight: '', family: 'Nistha, Georgia, serif', text: 'Grahit', scale: 1.0, y: 0 },
+        { weight: '300 ', family: '-apple-system, "SF Pro Display", "Helvetica Neue", sans-serif', text: 'Grahit', scale: 0.9, y: -15 },
+        { weight: '', family: 'AnekKannada, serif', text: 'ಗೃಹೀತ', scale: 0.85, y: 10 },
+        { weight: '', family: 'Akasha, serif', text: 'गृहीत', scale: 1.25, y: 0 },
     ],
 
     // --- Text rendering ---
@@ -224,7 +224,7 @@ App.Config = {
     // Base font = Math.min(W × FONT_BASE_W, H × FONT_BASE_H)
     FONT_BASE_W:    0.15,
     FONT_BASE_H:    0.09,
-    FONT_HERO:      1.15,  // name reveal (Raaga)
+    FONT_HERO:      1.15,  // name reveal
     FONT_TITLE:     0.45,  // "Meet"
     FONT_BODY:      0.36,  // birth date
     FONT_CAPTION:   0.3,   // footer ("Made with love")
@@ -234,7 +234,7 @@ App.Config = {
     DATE_OFFSET_Y:  0.85,  // date position below name
     LETTER_SPREAD:  1.2,   // letter separation during formation
 
-    BIRTH_DATE:       'Arrived · May 16, 2026',
+    BIRTH_DATE:       'Arrived · May xx, 2026',
 
     // --- Audio ---
     AUDIO_UPDATE_INTERVAL: 200,  // ms between audio parameter updates; lower = smoother but more CPU
