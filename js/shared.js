@@ -20,7 +20,7 @@ App.randomColor = function() { return App.STRING_COLORS[Math.floor(Math.random()
 
 App.baseFont = function(W, H) { return Math.min(W * App.Config.FONT_BASE_W, H * App.Config.FONT_BASE_H); };
 
-App.NAME_LETTERS = ['G', 'r', 'a', 'h', 'ya'];
+App.NAME_LETTERS = ['R', 'a', 'a', 'g', 'a'];
 
 // Fetch LAN IP from dev server for mobile testing
 (function() {
