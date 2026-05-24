@@ -60,6 +60,6 @@ window.addEventListener('unhandledrejection', function(e) {
             try { fetch('/log', { method: 'POST', body: payload, keepalive: true }).catch(function(){}); } catch(e) {}
         }, App.Config.LOG_FLUSH_INTERVAL_MS);
 
-        App.dbg('BEACON_INIT: page loaded, DPR=' + window.devicePixelRatio + ', screen=' + screen.width + 'x' + screen.height);
+        App.dbg('BEACON_INIT: ' + App._envSummary() + ' DPR=' + window.devicePixelRatio + ' screen=' + screen.width + 'x' + screen.height + ' viewport=' + window.innerWidth + 'x' + window.innerHeight + ' ua="' + navigator.userAgent + '"');
     });
 })();

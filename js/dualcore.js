@@ -39,6 +39,22 @@ App.DualCore = (function() {
     let coreB = makeCore();
     let mergeFlash = 0;
 
+    const STATE_NAMES = ['ORBITING_INSIDE','ORBITING_OUTSIDE','FLYING','DESCENDING','SETTLED','DONE'];
+
+    // Module-scope state tracking so log dedup survives reset() (which recreates
+    // the core objects every frame pre-burst, losing per-core flags).
+    const _lastLoggedState = { A: null, B: null };
+
+    function logStateChange(label, core, time) {
+        if (!App.dbg || !App.Config || !App.Config.DEBUG) return;
+        if (_lastLoggedState[label] === core.state) return;
+        const from = _lastLoggedState[label] !== null ? STATE_NAMES[_lastLoggedState[label]] : 'init';
+        const to = STATE_NAMES[core.state];
+        const fe = (App.Footer && App.Footer.getElapsed) ? App.Footer.getElapsed().toFixed(3) : '?';
+        App.dbg('CORE_' + label + ': ' + from + ' → ' + to + ' fe=' + fe + ' t=' + time.toFixed(3));
+        _lastLoggedState[label] = core.state;
+    }
+
     function reset() {
         coreA = makeCore();
         coreB = makeCore();
@@ -270,6 +286,8 @@ App.DualCore = (function() {
                 ctx.lineWidth = 1.5 * DPR * (1 - separation);
                 ctx.stroke();
             }
+            logStateChange('A', coreA, time);
+            logStateChange('B', coreB, time);
             return;
         }
 
@@ -317,6 +335,9 @@ App.DualCore = (function() {
             App.Footer.isSecondaryStarted(), ORBIT_SPEED_B, PHASE_OFFSET,
             '200, 220, 255', '150, 180, 255', '180, 200, 255',
             photoFade + T.primaryDelay + T.shiftDelay + T.revealDuration * 0.6, orbAlpha);
+
+        logStateChange('A', coreA, time);
+        logStateChange('B', coreB, time);
     }
 
     function renderCore(ctx, core, cx, cy, orbRadius, coreR, time, revealActive, target, dotTarget, isDone, orbitSpeed, phaseOff, colorInner, colorMid, trailColor, totalFlightTime, parentAlpha) {
@@ -354,8 +375,12 @@ App.DualCore = (function() {
 
         // ORBITING_OUTSIDE → FLYING (reveal resumed)
         if (core.state === STATE.ORBITING_OUTSIDE && revealActive) {
-            const flightDur = isDone ? 2.5 : totalFlightTime;
-            launchFlight(core, lastX, lastY, dotTarget.x, dotTarget.y, cx, cy, orbRadius, time, flightDur);
+            // Re-launches always use 2.5s. totalFlightTime is calibrated for the
+            // INITIAL post-burst launch so the core arrives in sync with its
+            // footer milestone (~4.6s for Shruti, ~8.1s for Vinod). Reusing those
+            // long durations on re-launch makes the core crawl back; the descent
+            // gate (flightP > 0.9 && isDone) already handles the milestone wait.
+            launchFlight(core, lastX, lastY, dotTarget.x, dotTarget.y, cx, cy, orbRadius, time, 2.5);
         }
 
         // --- Compute position ---
@@ -445,6 +470,11 @@ App.DualCore = (function() {
     return {
         draw, reset, getFlightProgress,
         getCorePositions() { return [{ x: coreA._renderedX, y: coreA._renderedY }, { x: coreB._renderedX, y: coreB._renderedY }]; },
-        areBothOrbiting() { return coreA.state === STATE.ORBITING_OUTSIDE && coreB.state === STATE.ORBITING_OUTSIDE; }
+        areBothOrbiting() { return coreA.state === STATE.ORBITING_OUTSIDE && coreB.state === STATE.ORBITING_OUTSIDE; },
+        // True once core A (Shruti, gold) has finished its descent onto her 'i'
+        // dot. Used by Footer.tick to drive shrutiGlowP — replaces the previous
+        // time-based `settled` trigger that lit both names simultaneously.
+        isShrutiCoreSettled() { return coreA.state === STATE.SETTLED; },
+        isVinodCoreSettled() { return coreB.state === STATE.SETTLED; },
     };
 })();

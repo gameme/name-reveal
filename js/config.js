@@ -246,8 +246,8 @@ App.Config = {
     MELODY_FADE_END:   0.75,     // scroll progress where melody reaches full volume (matches ORB_GROW end)
 
     // --- Debug ---
-    DEBUG: false,
-    LOG_MAX_ENTRIES:       100,    // ring buffer cap for the debug log
+    DEBUG: true,
+    LOG_MAX_ENTRIES:       500,    // ring buffer cap; bumped from 100 for per-frame footer diagnostic
     LOG_FLUSH_INTERVAL_MS: 3000,   // beacon flush cadence (POSTs to /log)
     // Global time scale for the entire experience. 1.0 = normal, 0.1 = 10× slow-mo, 2.0 = double speed.
     TIME_SCALE: 1.0,

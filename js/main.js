@@ -46,6 +46,48 @@ window.App = window.App || {};
     App.Particles.init();
     App.Input.bindEvents(canvas);
 
+    // One-shot measureText diagnostic — captures iOS 26.5 width-vs-ink drift for
+    // the heart emoji variants and each cycle-font sample. Logs once after fonts
+    // are loaded so custom faces aren't measured via the serif fallback. Output
+    // goes to the beacon (DEBUG only) so we can compare iOS 26.5 vs macOS runs.
+    function logMeasureDiagnostic() {
+        if (!C.DEBUG) return;
+        const fs = App.baseFont(App.W, App.H);
+        function logOne(label, text, font) {
+            ctx.font = font;
+            const m = ctx.measureText(text);
+            const aL = m.actualBoundingBoxLeft || 0;
+            const aR = m.actualBoundingBoxRight || 0;
+            App.dbg('MEASURE: ' + label
+                + ' text="' + text + '"'
+                + ' font="' + font + '"'
+                + ' width=' + m.width.toFixed(2)
+                + ' boxL=' + aL.toFixed(2)
+                + ' boxR=' + aR.toFixed(2)
+                + ' inkWidth=' + (aL + aR).toFixed(2)
+                + ' delta=' + ((aL + aR) - m.width).toFixed(2));
+        }
+        const footerSize = fs * C.FONT_CAPTION;
+        const footerFont = '200 ' + footerSize + 'px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif';
+        logOne('footer-heart-vs16', '❣️', footerFont);  // ❣️ with variation selector
+        logOne('footer-heart-bare', '❣',       footerFont);  // ❣ no VS16
+        logOne('footer-heart-red',  '❤',       footerFont);  // ❤ alternative
+        logOne('footer-heart-emj',  '❤️', footerFont);  // ❤️ alternative with VS16
+        logOne('footer-with',  'with ',             footerFont);
+        logOne('footer-in',    'in California by ', footerFont);
+        const heroSize = fs * C.FONT_HERO;
+        for (const f of C.CYCLE_FONTS) {
+            const fontStr = f.weight + (heroSize * f.scale) + 'px ' + f.family;
+            const tag = f.family.split(',')[0].replace(/['"]/g, '').trim();
+            logOne('name-' + tag, f.text, fontStr);
+        }
+    }
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(logMeasureDiagnostic);
+    } else {
+        setTimeout(logMeasureDiagnostic, 1000);
+    }
+
     // Selectable HUD overlay for LAN URL
     const debugHud = document.getElementById('debugHud');
     if (C.DEBUG && debugHud) {
@@ -429,7 +471,11 @@ window.App = window.App || {};
         ctx.shadowColor = `rgba(${gc}, ${0.7 * intensity})`;
         ctx.shadowBlur = r * 0.6;
         ctx.fillText(text, x, y);
+        // Clear BOTH blur and color — shadowBlur=0 alone leaves a sharp shadow
+        // when shadowColor has alpha (Chrome behaviour); subsequent fillText
+        // calls would inherit the gold tint.
         ctx.shadowBlur = 0;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0)';
     }
 
     // Returns the highest chime index whose scheduled time is <= elapsed, or -1 if none.
@@ -603,7 +649,14 @@ window.App = window.App || {};
         const footerElapsed = State.burstTime >= 0
             ? Math.max(0, time - State.burstTime - C.PHOTO_FADE_DURATION)
             : -1;
-        App.Footer.tick(footerElapsed, (rawDt * 0.001) * C.TIME_SCALE);
+        // Pass per-core settled flags so footer can light each name as its
+        // flame arrives, instead of both at once via the state-machine clock.
+        App.Footer.tick(
+            footerElapsed,
+            (rawDt * 0.001) * C.TIME_SCALE,
+            App.DualCore.isShrutiCoreSettled && App.DualCore.isShrutiCoreSettled(),
+            App.DualCore.isVinodCoreSettled && App.DualCore.isVinodCoreSettled(),
+        );
 
         try {
 
@@ -1115,32 +1168,40 @@ window.App = window.App || {};
                 const burstGlow = burstFlash * C.BURST_TEXT_GLOW;
 
                 function setFont(f, sizeMult) {
-                    ctx.font = `${f.weight}${fontSize * C.FONT_HERO * f.scale * sizeMult * burstScale}px ${f.family}`;
+                    const size = fontSize * C.FONT_HERO * f.scale * sizeMult * burstScale;
+                    ctx.font = `${f.weight}${size}px ${f.family}`;
+                    return size;
                 }
 
-                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                // Manual centering — Safari/WebKit 26.5 has a measureText regression
+                // for Devanagari/Kannada shaping that breaks textAlign='center'.
+                // App.getCycleFontInk pixel-scans once at a base size and we scale.
+                ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
                 if (segT < holdDuration) {
-                    setFont(currFont, 1);
+                    const sz = setFont(currFont, 1);
+                    const x = App.getCycleFontCenterX(currFont, sz, cx);
                     ctx.fillStyle = `${flashColor} ${textP})`;
-                    drawGlowText(currFont.text, cx, belowY + currFont.y * DPR, textP * glowPulse + burstGlow);
+                    drawGlowText(currFont.text, x, belowY + currFont.y * DPR, textP * glowPulse + burstGlow);
                 } else {
                     const p = (segT - holdDuration) / transitionDuration;
                     // Outgoing: scale-up + fade over first 60%
                     if (p < 0.6) {
                         const outP = p / 0.6;
                         const fade = 1 - outP * outP;
-                        setFont(currFont, 1 + outP * (C.FONT_SCALE_OUT_MAX - 1));
+                        const sz = setFont(currFont, 1 + outP * (C.FONT_SCALE_OUT_MAX - 1));
+                        const x = App.getCycleFontCenterX(currFont, sz, cx);
                         ctx.fillStyle = `${flashColor} ${textP * fade})`;
-                        drawGlowText(currFont.text, cx, belowY + currFont.y * DPR, textP * fade + burstGlow);
+                        drawGlowText(currFont.text, x, belowY + currFont.y * DPR, textP * fade + burstGlow);
                     }
                     // Incoming: scale-in from 35%, overshoots then settles
                     const inP = Math.max(0, (p - 0.35) / 0.65);
                     if (inP > 0) {
                         const eased = inP * inP * (3 - 2 * inP);
                         const overshoot = 1 + 0.14 * Math.sin(inP * Math.PI);
-                        setFont(nextFont, (0.7 + eased * 0.3) * overshoot);
+                        const sz = setFont(nextFont, (0.7 + eased * 0.3) * overshoot);
+                        const x = App.getCycleFontCenterX(nextFont, sz, cx);
                         ctx.fillStyle = `${flashColor} ${textP * eased})`;
-                        drawGlowText(nextFont.text, cx, belowY + nextFont.y * DPR, textP * eased + burstGlow);
+                        drawGlowText(nextFont.text, x, belowY + nextFont.y * DPR, textP * eased + burstGlow);
                     }
                 }
             }
@@ -1229,6 +1290,13 @@ window.App = window.App || {};
         // of the draw loop, so scroll-up never freezes or rewinds it.
         if (State.isComplete) {
             App.Footer.draw(ctx, time, 1, fontSize, cx, H);
+            // Regression guard: footer must not leave shadow state dirty on the shared canvas context.
+            if (C.DEBUG) {
+                const _fe = App.Footer.getElapsed();
+                if (_fe >= 5 && _fe <= 20 && Math.floor(_fe * 60) % 6 === 0) {
+                    App.dbg('FOOTER_SHADOW_EXIT: blur=' + ctx.shadowBlur + ' color=' + ctx.shadowColor);
+                }
+            }
         }
 
         // Sparkles (outside reveal — handles tap bursts when scrolled away)
