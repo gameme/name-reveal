@@ -347,21 +347,27 @@ App.Footer = (function() {
 
         let layout = _layout;
         if (!layout || layout.font !== font || layout.footerSize !== footerSize) {
-            // Measure on the main canvas if available; otherwise the tanpura canvas.
-            const tmpCtx = (document.getElementById('canvas') || document.getElementById('tanpura')).getContext('2d');
+            const tmpCtx = document.getElementById('tanpura').getContext('2d');
             layout = measureLayout(tmpCtx, font, footerSize);
         }
         const w = layout.widths;
 
-        // Cursor walk at shiftP=1 mirrors draw() step-by-step.
-        const totalW = w.made + w.withHeart + w.prefix + w.shruti + w.shrutiTrailingSpace + w.amp + w.vinod;
+        // Cursor walk uses the CURRENT shiftP from the footer's elapsed clock so
+        // dot targets track where Shruti and Vinod are actually rendered each frame.
+        // Pre-shift (shiftP=0): "Made in California by Shruti " is centred — Shruti
+        // sits further right. As shiftP ramps to 1 the layout reflows and Shruti
+        // slides left to make room for "with ❣️ " and "& Vinod". DualCore reads
+        // dotTarget live every frame, so cores follow the slide instead of landing
+        // at the post-shift position while text is still pre-shift.
+        const shiftP = _lastElapsed >= 0 ? deriveProgress(_lastElapsed).shiftP : 1;
+        const totalW = w.made + w.withHeart * shiftP + w.prefix + w.shruti + w.shrutiTrailingSpace + (w.amp + w.vinod) * shiftP;
         const baseX = Math.round(cx - totalW / 2);
 
         const xWith   = baseX + w.made;
-        const xPrefix = xWith  + w.withHeart;
+        const xPrefix = xWith  + w.withHeart * shiftP;
         const xShruti = xPrefix + w.prefix;
-        const xAmp    = xShruti + w.shruti + w.shrutiTrailingSpace; // trailing space included
-        const xVinod  = xAmp   + w.amp;
+        const xAmp    = xShruti + w.shruti + w.shrutiTrailingSpace; // trailing space unscaled
+        const xVinod  = xAmp   + w.amp;                              // amp unscaled — matches draw cursor
 
         const coreOffsetY = footerSize * 1.5;
         const dotY = footerY - footerSize * 0.35;

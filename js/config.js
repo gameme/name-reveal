@@ -93,10 +93,10 @@ App.Config = {
     ORB_PULSE_AMP_2:    0.015, // secondary breathing depth
 
     // --- Orb energy ---
-    ENERGY_DECAY:           0.985,  // per-frame decay (lower = faster drain)
+    ENERGY_DECAY:           0.99,   // per-frame decay (lower = faster drain). Bumped from 0.985 so single-strum energy lingers visibly while user explores.
     ENERGY_DECAY_REVEAL:    0.975,  // faster decay during name reveal
     ENERGY_GAIN_ABSORB:     0.02,   // energy per absorbed particle
-    ENERGY_GAIN_STRUM:      0.5,   // energy per strum (weighted by velocity)
+    ENERGY_GAIN_STRUM:      3.0,   // energy per strum (weighted by velocity). Bumped from 0.5: a single full strum now produces visible god-ray growth (intensity ≈ 0.27 of max), accumulating with subsequent strums and capping at the brightness range. Mobile discoverability — first strum should reward.
     ENERGY_FLOOR_POST_BURST: 3.0,   // minimum energy after photo reveal
     ENERGY_BRIGHTNESS_MIN:  0.3,    // orb alpha at zero energy
     ENERGY_BRIGHTNESS_RANGE: 0.7,   // additional alpha at max energy

@@ -10,7 +10,7 @@ As you scroll, four strings fade in and start to vibrate. Touch them — they pl
 
 Scroll further and an orb forms in the center. The strings bend toward it, dissolving into ribbons of light that pour into the orb. Inside the orb, two small cores — one warm, one cool — circle each other. Sometimes they pass close enough to flash and spit a few sparks.
 
-Keep scrolling. Letters begin to materialize one by one — R · a · a · g · a — each accompanied by a single chime that walks the full octave (Sa to Sa'). The orb shrinks as something gathers in it, then bursts: a flash, a shockwave, the photo.
+Keep scrolling. Five tiny constellations form one by one in the slots where the name will eventually land — each pops in with a sparkle burst and a chime that walks the swara scale (Sa, Re, Ga, Ma, Pa). Below each constellation, its swara name and the corresponding musical note appear together. The orb shrinks as something gathers in it, then bursts: a flash, a shockwave, the photo.
 
 After the burst, a melody comes in. The name cycles through different fonts — Latin, Kannada (ರಾಗಾ), Devanagari (रागा). At the bottom of the screen, slowly, a credit line resolves: "Made with ❣️ in California by Shruti & Vinod". The two binary cores fly out of the orb, glide along curves, and land precisely on the dots of the two i's. There they sit and flicker — small candle flames over the names of the parents.
 
@@ -22,7 +22,13 @@ python3 dev-server.py
 
 Serves on `http://0.0.0.0:8080`. The HUD bottom-left will show the LAN URL — open that on a phone for mobile testing. The dev server tails console logs from any connected client into `mobile-debug.log`.
 
-To run the in-browser unit tests, open `tests.html` directly.
+To run the in-browser unit tests, open `tests.html` directly. For end-to-end verification across the five scroll scenarios (default, mid-flight scrollup, post-Shruti-only scrollup, post-settle scrollup, pre-burst scrollup), use the harness:
+
+```
+uv run .auto/run.py [--early-scrollup | --mid-scrollup | --scrollup | --pre-burst-scrollup]
+```
+
+Expected counts per scenario are documented in `.auto/baseline-expectations.md`.
 
 For sharing, set `Config.DEBUG = false` in `js/config.js` to silence the debug beacon and HUD.
 

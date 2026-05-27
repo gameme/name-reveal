@@ -41,8 +41,8 @@ App.DualCore = (function() {
 
     const STATE_NAMES = ['ORBITING_INSIDE','ORBITING_OUTSIDE','FLYING','DESCENDING','SETTLED','DONE'];
 
-    // Module-scope state tracking so log dedup survives reset() (which recreates
-    // the core objects every frame pre-burst, losing per-core flags).
+    // Module-scope state tracking so log dedup survives reset() (which clears
+    // per-core fields when the user scrolls back below the reveal threshold).
     const _lastLoggedState = { A: null, B: null };
 
     function logStateChange(label, core, time) {

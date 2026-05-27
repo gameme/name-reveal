@@ -4,11 +4,15 @@
 import datetime
 import http.server
 import os
+import re
 import socket
 from typing import Any  # Any required: SimpleHTTPRequestHandler.__init__ forwards arbitrary args/kwargs
+from urllib.parse import parse_qs
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(ROOT, "mobile-debug.log")
+SESSIONS_DIR = os.path.join(ROOT, ".auto", "sessions")
+SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")  # safe filename, no path traversal
 
 
 def get_lan_ip() -> str:
@@ -41,17 +45,29 @@ class LogServer(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self) -> None:
-        if self.path == "/log":
+        path, _, query = self.path.partition("?")
+        if path == "/log":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode("utf-8", errors="replace")
             timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+
+            # Per-session routing for parallel harness runs. ?session=<id> picks
+            # .auto/sessions/<id>.log; missing/invalid session falls back to the
+            # default mobile-debug.log so existing single-client beacons keep working.
+            session_id = parse_qs(query).get("session", [None])[0]
+            if session_id and SESSION_RE.match(session_id):
+                os.makedirs(SESSIONS_DIR, exist_ok=True)
+                target = os.path.join(SESSIONS_DIR, f"{session_id}.log")
+            else:
+                target = LOG_FILE
+
             # Reset log on new session (page load beacon)
             if "BEACON_INIT" in body:
-                with open(LOG_FILE, "w") as f:
+                with open(target, "w") as f:
                     f.write(f"=== New session {timestamp} ===\n")
                     f.write(f"\n--- {timestamp} ---\n{body}\n")
             else:
-                with open(LOG_FILE, "a") as f:
+                with open(target, "a") as f:
                     f.write(f"\n--- {timestamp} ---\n{body}\n")
             self.send_response(204)
             self.end_headers()
@@ -72,6 +88,9 @@ class LogServer(http.server.SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     with open(LOG_FILE, "w") as f:
         f.write("=== Mobile debug log started ===\n")
-    server = http.server.HTTPServer(("0.0.0.0", 8080), LogServer)
-    print(f"Serving on http://0.0.0.0:8080 — logs → {LOG_FILE}")
+    # ThreadingHTTPServer: handle concurrent /log POSTs from parallel harness
+    # scenarios without serializing them behind one another. Single-threaded
+    # HTTPServer was the bottleneck that made `run-all.py` lose beacons.
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", 8080), LogServer)
+    print(f"Serving on http://0.0.0.0:8080 — logs → {LOG_FILE} (ThreadingHTTPServer)")
     server.serve_forever()

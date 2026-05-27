@@ -20,6 +20,16 @@ window.App = window.App || {};
     const muteBtn = document.getElementById('muteBtn');
     const DPR = App.DPR;
 
+    // Module-load: chime + sparkle schedule. Sa-Pa chimes shift by popPeakOffset
+    // so audio + sparkle land on each constellation's visual peak.
+    const POP_PEAK_OFFSET_SEC = Math.max(C.CONSTELLATIONS.ANCHOR_FADE_IN, C.CONSTELLATIONS.FILLER_FADE_IN) / 1000 * 0.7;
+    const CHIME_SCHEDULE = (function() {
+        const active = C.CONSTELLATIONS.CHIME_SCHEDULE_ACTIVE;
+        const base = active === 'ACCEL' ? C.CONSTELLATIONS.CHIME_SCHEDULE_ACCEL : C.CONSTELLATIONS.CHIME_SCHEDULE_STEADY;
+        return base.map((t, i) => i <= 4 ? t + POP_PEAK_OFFSET_SEC : t);
+    })();
+    App._chimeSchedule = CHIME_SCHEDULE; // exposed for tests.html
+
     function resize() {
         const newW = window.innerWidth * DPR;
         const vvH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
@@ -551,6 +561,7 @@ window.App = window.App || {};
         burstTime: -1,
         lastBurstIndex: -1,
         lastSwaraIndex: -1,
+        lastSparkleIndex: -1,
         photoBurst: false,
 
         get isComplete() { return this.phase === PHASE.COMPLETE; },
@@ -562,6 +573,7 @@ window.App = window.App || {};
                 this.startTime = time - photoDelay - App.Config.PHOTO_FADE_DURATION;
                 this.lastBurstIndex = App.NAME_LETTERS.length - 1;
                 this.lastSwaraIndex = 7;
+                this.lastSparkleIndex = 4;
                 this.photoBurst = true;
             } else {
                 this.startTime = time;
@@ -580,6 +592,7 @@ window.App = window.App || {};
                 this.phase = PHASE.IDLE;
                 this.lastBurstIndex = -1;
                 this.lastSwaraIndex = -1;
+                this.lastSparkleIndex = -1;
                 this.photoBurst = false;
                 sparkles.length = 0;
                 App.DualCore.reset();
@@ -1053,16 +1066,17 @@ window.App = window.App || {};
 
             const letterPositions = cachedLetterPositions;
 
-            // Timed swara sequence: Sa Re Ga Ma Pa Dha Ni Sa' spread across formation
-            // Chime dispatch: schedule-driven per spec §6.
-            // Chimes 1-5 (Sa-Pa) sync to constellation appearances; chimes 6-8 (Dha,Ni,Sa') fire during compression.
-            const chimeSchedule = (function() {
-                const active = C.CONSTELLATIONS.CHIME_SCHEDULE_ACTIVE;
-                if (active === 'ACCEL') return C.CONSTELLATIONS.CHIME_SCHEDULE_ACCEL;
-                return C.CONSTELLATIONS.CHIME_SCHEDULE_STEADY;
-            })();
+            // Hoist constellation geometry before the chime block so App.constellationCenterY is defined
+            // when the Sa (idx=0) sparkle fires on the very first frame where revealElapsed >= 0.
+            // These depend only on belowY, offsetY, cx, and spreadX — all computed above.
+            App.constellationCenterY = belowY + offsetY;
+            App.constellationCenterX = cx;
+            App.constellationSpreadX = spreadX;
+
+            // Timed swara sequence: Sa Re Ga Ma Pa Dha Ni Sa' spread across formation.
+            // Schedule (with Sa-Pa peak-offset shift) is precomputed at module load.
             if (revealElapsed >= 0) {
-                const swaraIdx = computeChimeIndex(revealElapsed, chimeSchedule);
+                const swaraIdx = computeChimeIndex(revealElapsed, CHIME_SCHEDULE);
                 if (swaraIdx >= 0 && swaraIdx > State.lastSwaraIndex) {
                     State.lastSwaraIndex = swaraIdx;
                     App.dbg('SWARA: ' + ['Sa','Re','Ga','Ma','Pa','Dha','Ni','Sa\''][swaraIdx] + ' (' + swaraIdx + ')');
@@ -1070,14 +1084,38 @@ window.App = window.App || {};
                 }
             }
 
+            // Constellation pop sparkles: fire at each slot's visual peak (sinceSlot ≈ 0.7 × appearWindow),
+            // not at chime moment. The eye pairs the sparkle with the punch, not the audio cue.
+            if (revealElapsed >= 0 && App.constellationCenterY !== undefined && App.getCachedLetterSlots) {
+                const SLOT_INTERVAL = 1.5;
+                const slots = App.getCachedLetterSlots();
+                if (slots) {
+                    for (let i = 0; i <= 4; i++) {
+                        const peakTime = i * SLOT_INTERVAL + POP_PEAK_OFFSET_SEC;
+                        if (revealElapsed >= peakTime && i > State.lastSparkleIndex && slots[i]) {
+                            State.lastSparkleIndex = i;
+                            const slot = slots[i];
+                            const sx = App.constellationCenterX + (slot.x - App.constellationCenterX) * (App.constellationSpreadX || 1);
+                            const sy = App.constellationCenterY;
+                            const sparkN = C.LETTER_SPARKLE_COUNT;
+                            for (let sp = 0; sp < sparkN; sp++) {
+                                const a = (sp / sparkN) * Math.PI * 2 + Math.random() * C.LETTER_SPARKLE_ANGLE_JITTER;
+                                const spd = C.LETTER_SPARKLE_SPEED_MIN + Math.random() * C.LETTER_SPARKLE_SPEED_RANGE;
+                                sparkles.push({
+                                    x: sx, y: sy,
+                                    vx: Math.cos(a) * spd * DPR, vy: Math.sin(a) * spd * DPR,
+                                    life: 1.0,
+                                    size: (C.LETTER_SPARKLE_SIZE_MIN + Math.random() * C.LETTER_SPARKLE_SIZE_RANGE) * DPR,
+                                });
+                            }
+                            if (C.DEBUG) App.dbg('CONSTELLATION_SPARK: idx=' + i + ' n=' + sparkN);
+                        }
+                    }
+                }
+            }
+
             // Constellation rendering — replaces the old letter formation visual during 0→13.5s.
-            // App.constellationCenterY is the y where letters render, so the dot→letter morph aligns.
-            // App.constellationCenterX + spreadX let the constellation module track horizontal letter
-            // spread (formation spreads letters outward; compression converges them) — same formula
-            // letter rendering uses below, so constellations sit exactly where letters will appear.
-            App.constellationCenterY = belowY + offsetY;
-            App.constellationCenterX = cx;
-            App.constellationSpreadX = spreadX;
+            // Geometry (constellationCenterY/X/SpreadX) was set above the chime block.
             App.Constellations.draw(
                 ctx,
                 revealProgress,
@@ -1128,12 +1166,9 @@ window.App = window.App || {};
                     if (materializePhase > C.LETTER_BURST_TRIGGER_PHASE && activeIndex > State.lastBurstIndex) {
                         State.lastBurstIndex = activeIndex;
                         App.dbg('LETTER: "' + letters[activeIndex] + '" materialized (' + activeIndex + '/' + (letters.length - 1) + ')');
-                        const sparkN = C.LETTER_SPARKLE_COUNT;
-                        for (let sp = 0; sp < sparkN; sp++) {
-                            const a = (sp / sparkN) * Math.PI * 2 + Math.random() * C.LETTER_SPARKLE_ANGLE_JITTER;
-                            const spd = C.LETTER_SPARKLE_SPEED_MIN + Math.random() * C.LETTER_SPARKLE_SPEED_RANGE;
-                            sparkles.push({ x: targetX, y: belowY + offsetY, vx: Math.cos(a) * spd * DPR, vy: Math.sin(a) * spd * DPR, life: 1.0, size: (C.LETTER_SPARKLE_SIZE_MIN + Math.random() * C.LETTER_SPARKLE_SIZE_RANGE) * DPR });
-                        }
+                        // Sparkle spawn removed — constellations replaced the letter-formation
+                        // visual, and the per-constellation sparkle now fires at pop peak above.
+                        // Keeping the index/log update for debug correlation only.
                     }
                 }
             }

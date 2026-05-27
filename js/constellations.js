@@ -518,10 +518,32 @@ App.Constellations = (function() {
             // Per-slot formation fade-in
             const slotStart = i * SLOT_INTERVAL;
             const sinceSlot = now - slotStart;
-            const labelStartSec = (C_C.LINE_DRAW_DELAY + C_C.LABEL_DELAY_AFTER_LINES) / 1000;
+            // Why: label start is anchored to the zoom-pop overshoot peak (mid-window of APPEARING)
+            // so the name lands as the constellation finishes settling, not on a separate delay.
+            const appearWindowSec = Math.max(C_C.ANCHOR_FADE_IN, C_C.FILLER_FADE_IN) / 1000;
+            const labelStartSec = appearWindowSec / 2;
             const labelFadeSec = C_C.LABEL_FADE_IN / 1000;
             const labelFade = clamp01((sinceSlot - labelStartSec) / labelFadeSec);
             if (labelFade <= 0) continue;
+
+            // Label pop-and-settle: same smoothstep + overshoot recipe as the
+            // constellation pop, parameterised on labelFade so the name lands with a
+            // matching punch (peak ~1.16× near labelPopP=0.7) before settling at 1.0.
+            // Asymmetric pacing matches the constellation: rise quickly, settle slowly.
+            const labelTime = sinceSlot - labelStartSec;
+            const labelPeakSec = labelFadeSec * 0.7;
+            const labelSettleSec = labelPeakSec + labelFadeSec * 0.7;
+            let labelPopP;
+            if (labelTime >= labelSettleSec) {
+                labelPopP = 1.0;
+            } else if (labelTime < labelPeakSec) {
+                labelPopP = (labelTime / labelPeakSec) * 0.7;
+            } else {
+                labelPopP = 0.7 + ((labelTime - labelPeakSec) / (labelSettleSec - labelPeakSec)) * 0.3;
+            }
+            const labelPopEased = labelPopP * labelPopP * (3 - 2 * labelPopP);
+            const labelPopOvershoot = 1 + 0.3 * Math.sin(labelPopP * Math.PI);
+            const labelPopScale = labelPopP < 1 ? (0.7 + labelPopEased * 0.3) * labelPopOvershoot : 1.0;
 
             const cdata = CONSTELLATION_DATA[i];
             const slotX = slots[i].x;
@@ -533,6 +555,14 @@ App.Constellations = (function() {
             const textWidth = ctx.measureText(swaraText).width;
             const totalWidth = textWidth + inlineNoteWidth;
             const labelLeftX = slotX - totalWidth / 2;
+
+            // Pop-scale wrap: scales the entire label (text + note glyph) around
+            // (slotX, baseLabelY) during the appear window. Identity transform
+            // once labelPopScale == 1.0 so compression-phase rendering is unchanged.
+            ctx.save();
+            ctx.translate(slotX, baseLabelY);
+            ctx.scale(labelPopScale, labelPopScale);
+            ctx.translate(-slotX, -baseLabelY);
 
             // Text portion (faded by formation fade-in × compression text fade)
             const textAlpha = labelFade * outerAlpha * C_C.LABEL_BASE_ALPHA * textCompAlpha;
@@ -591,6 +621,7 @@ App.Constellations = (function() {
                 ctx.fill();
             }
             drawNote(ctx, nx, ny, noteType, noteAlpha, noteScale);
+            ctx.restore();
         }
 
         // Staff fades out during the first half of drift as the notes lift away
@@ -606,6 +637,7 @@ App.Constellations = (function() {
     function drawConstellation(ctx, slotIdx, slotCenterPx, unitToPx, outerAlpha, now) {
         const rs = runtimeState[slotIdx];
         const cdata = CONSTELLATION_DATA[slotIdx];
+        const C_C = C.CONSTELLATIONS;
 
         if (rs.state === STATE.HIDDEN ||
             rs.state === STATE.DONE ||
@@ -618,9 +650,9 @@ App.Constellations = (function() {
         const sinceSlot = now - slotStart;
 
         // Anchor fade-in duration (seconds)
-        const anchorFade = clamp01(sinceSlot / (C.CONSTELLATIONS.ANCHOR_FADE_IN / 1000));
+        const anchorFade = clamp01(sinceSlot / (C_C.ANCHOR_FADE_IN / 1000));
         // fillerFadeSec used inline per-dot to apply per-dot stagger
-        const fillerFadeSec = C.CONSTELLATIONS.FILLER_FADE_IN / 1000;
+        const fillerFadeSec = C_C.FILLER_FADE_IN / 1000;
 
         // Compression-phase modifiers (active when rs.state === GLOWING)
         const isGlowing = rs.state === STATE.GLOWING;
@@ -628,11 +660,33 @@ App.Constellations = (function() {
 
         // Compression-phase line glow-up (linear ramp 0→1 across 6s compression window)
         const compFraction = isGlowing ? clamp01((now - FORMATION_DURATION) / 6.0) : 0;
-        const lineAlphaMul = 1.0 + compFraction * (C.CONSTELLATIONS.COMPRESSION_LINE_ALPHA_END / 0.4 - 1.0);
-        const lineWidthMul = 1.0 + compFraction * (C.CONSTELLATIONS.COMPRESSION_LINE_WIDTH_END / 0.6 - 1.0);
+        const lineAlphaMul = 1.0 + compFraction * (C_C.COMPRESSION_LINE_ALPHA_END / 0.4 - 1.0);
+        const lineWidthMul = 1.0 + compFraction * (C_C.COMPRESSION_LINE_WIDTH_END / 0.6 - 1.0);
+
+        // Pop-in scale: starts at 0.7, peaks ~1.16× near popInP=0.7, settles to 1.0
+        // via asymmetric smoothstep + sine overshoot. Once popInP reaches 1 the scale
+        // collapses to exactly 1.0, keeping SETTLED/GLOWING rendering byte-identical
+        // to the pre-pop path.
+        const appearWindowSec = Math.max(C_C.ANCHOR_FADE_IN, C_C.FILLER_FADE_IN) / 1000;
+        // Asymmetric pacing: rise to peak in `appearWindowSec * 0.7`, then linger longer on
+        // the way back to 1.0 so the settle reads as a relax rather than a snap.
+        const peakSec = appearWindowSec * 0.7;
+        const settleSec = peakSec + appearWindowSec * 0.7;
+        let popInP;
+        if (sinceSlot >= settleSec) {
+            popInP = 1.0;
+        } else if (sinceSlot < peakSec) {
+            popInP = (sinceSlot / peakSec) * 0.7;
+        } else {
+            popInP = 0.7 + ((sinceSlot - peakSec) / (settleSec - peakSec)) * 0.3;
+        }
+        const popEased = popInP * popInP * (3 - 2 * popInP);                 // smoothstep
+        const popOvershoot = 1 + 0.3 * Math.sin(popInP * Math.PI);           // peak overshoot 1.3× at popInP=0.5
+        const popScale = popInP < 1 ? (0.7 + popEased * 0.3) * popOvershoot : 1.0; // peaks ~1.16× near popInP=0.7
 
         ctx.save();
         ctx.translate(slotCenterPx.x, slotCenterPx.y);
+        ctx.scale(popScale, popScale);
 
         // Draw halo rings (Sa only) — fade in with anchor, then brighten + thicken
         // during compression so Sa's halos energize alongside the line-glow that the

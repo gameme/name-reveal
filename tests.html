@@ -690,6 +690,20 @@ assert(App._computeChimeIndex(7.5, STEADY) === 5, 't=7.5 → chime 5 (Dha)');
 assert(App._computeChimeIndex(10.5, STEADY) === 7, "t=10.5 → chime 7 (Sa')");
 assert(App._computeChimeIndex(15.0, STEADY) === 7, 't=15.0 → still chime 7');
 
+// Production-shifted schedule: Sa-Pa shifted by popPeakOffset so audio cue lands
+// on each constellation's pop peak. Replicated inline (main.js not loaded here).
+function buildShiftedSchedule(base, popPeakOffsetSec) {
+    return base.map((t, i) => i <= 4 ? t + popPeakOffsetSec : t);
+}
+const SHIFTED = buildShiftedSchedule(STEADY, 0.28);
+assert(SHIFTED[0] === 0.28, 'Sa shifted to 0.28s');
+assert(SHIFTED[4] === 6.28, 'Pa shifted to 6.28s');
+assert(SHIFTED[5] === 7.5,  'Dha unshifted (7.5)');
+assert(SHIFTED[7] === 10.5, "Sa' unshifted (10.5)");
+assert(App._computeChimeIndex(0, SHIFTED) === -1, 't=0 below Sa shifted time');
+assert(App._computeChimeIndex(0.28, SHIFTED) === 0, 't=0.28 → chime 0 (Sa shifted)');
+assert(App._computeChimeIndex(7.5, SHIFTED) === 5,  't=7.5 → chime 5 (Dha unshifted)');
+
 // === Two-threshold scroll commitment tests ===
 const COMMIT = App.Config.REVEAL_COMMIT_THRESHOLD;
 const RESET = App.Config.REVEAL_RESET_THRESHOLD;
